@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Зал</title>
+<meta name="theme-color" content="#121418">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Зал">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- Onboarding: profile pick -->
+  <div id="onboard" class="screen hidden">
+    <div class="onboard-inner">
+      <div class="brand-mark">VEETER FITNESS</div>
+      <h1>Зал</h1>
+      <p class="muted">Хто тренується на цьому телефоні?</p>
+      <div class="profile-grid">
+        <button class="profile-pick" data-profile="vitalii">
+          <span class="avatar">💪</span>
+          <span>Віталій</span>
+          <span class="muted small">5 днів · руки</span>
+        </button>
+        <button class="profile-pick" data-profile="tetiana">
+          <span class="avatar">🍑</span>
+          <span>Тетяна</span>
+          <span class="muted small">3 дні · сідниці</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main app -->
+  <div id="main" class="screen hidden">
+    <header class="topbar">
+      <button id="profileBtn" class="profile-chip"></button>
+      <div class="brand">Зал</div>
+      <button id="settingsBtn" class="icon-btn" aria-label="Налаштування">⚙️</button>
+    </header>
+
+    <div id="weekBanner" class="banner"></div>
+
+    <nav id="dayTabs" class="day-tabs"></nav>
+
+    <main id="dayContent" class="day-content"></main>
+
+    <nav class="tabbar">
+      <button class="tab-btn active" data-tab="today">Сьогодні</button>
+      <button class="tab-btn" data-tab="progress">Прогрес</button>
+      <button class="tab-btn" data-tab="body">Тіло</button>
+      <button class="tab-btn" data-tab="guide">Довідка</button>
+    </nav>
+  </div>
+
+  <!-- Progress tab -->
+  <div id="progressScreen" class="screen hidden">
+    <header class="topbar">
+      <div class="brand">Прогрес</div>
+      <div style="width:40px"></div>
+    </header>
+    <main id="progressContent" class="day-content"></main>
+    <nav class="tabbar">
+      <button class="tab-btn" data-tab="today">Сьогодні</button>
+      <button class="tab-btn active" data-tab="progress">Прогрес</button>
+      <button class="tab-btn" data-tab="body">Тіло</button>
+      <button class="tab-btn" data-tab="guide">Довідка</button>
+    </nav>
+  </div>
+
+  <!-- Body / nutrition tab -->
+  <div id="bodyScreen" class="screen hidden">
+    <header class="topbar">
+      <div class="brand">Тіло</div>
+      <div style="width:40px"></div>
+    </header>
+    <main id="bodyContent" class="day-content"></main>
+    <nav class="tabbar">
+      <button class="tab-btn" data-tab="today">Сьогодні</button>
+      <button class="tab-btn" data-tab="progress">Прогрес</button>
+      <button class="tab-btn active" data-tab="body">Тіло</button>
+      <button class="tab-btn" data-tab="guide">Довідка</button>
+    </nav>
+  </div>
+
+  <!-- Guide / nutrition+progression text tab -->
+  <div id="guideScreen" class="screen hidden">
+    <header class="topbar">
+      <div class="brand">Довідка</div>
+      <div style="width:40px"></div>
+    </header>
+    <main id="guideContent" class="day-content"></main>
+    <nav class="tabbar">
+      <button class="tab-btn" data-tab="today">Сьогодні</button>
+      <button class="tab-btn" data-tab="progress">Прогрес</button>
+      <button class="tab-btn" data-tab="body">Тіло</button>
+      <button class="tab-btn active" data-tab="guide">Довідка</button>
+    </nav>
+  </div>
+
+  <!-- Exercise detail sheet -->
+  <div id="sheetOverlay" class="sheet-overlay hidden">
+    <div id="sheet" class="sheet">
+      <div class="sheet-handle"></div>
+      <div id="sheetContent"></div>
+    </div>
+  </div>
+
+  <!-- Settings sheet -->
+  <div id="settingsOverlay" class="sheet-overlay hidden">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div id="settingsContent"></div>
+    </div>
+  </div>
+
+  <!-- Reps picker -->
+  <div id="pickerOverlay" class="sheet-overlay hidden">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div id="pickerContent"></div>
+    </div>
+  </div>
+
+  <!-- Rest timer bar -->
+  <div id="restBar" class="rest-bar hidden">
+    <div class="rest-info">
+      <span id="restLabel">Відпочинок</span>
+      <span id="restTime">60</span>
+    </div>
+    <div class="rest-actions">
+      <button id="restMinus">−15</button>
+      <button id="restSkip">Пропустити</button>
+      <button id="restPlus">+15</button>
+    </div>
+    <div id="restProgress" class="rest-progress"></div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
