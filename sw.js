@@ -1,4 +1,4 @@
-const CACHE = "zal-v3";
+const CACHE = "zal-v4";
 const CORE_ASSETS = [
   "./",
   "index.html",
@@ -74,35 +74,63 @@ const CORE_ASSETS = [
   "img/v-wed-8.jpg"
 ];
 
+// Код і програма — спершу з мережі (з таймаутом), щоб оновлення приходили одразу.
+// Картинки й іконки — з кешу: вони не змінюються.
+const FRESH = /\.(?:js|json|css|webmanifest|html)$|\/$/;
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(CORE_ASSETS)).then(() => self.skipWaiting())
+    caches.open(CACHE)
+      .then((cache) => cache.addAll(CORE_ASSETS.map((u) => new Request(u, { cache: "reload" }))))
+      .then(() => self.skipWaiting())
   );
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => k.startsWith("zal-") && k !== CACHE).map((k) => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
 
+function fromCache(req) {
+  return caches.match(req, { ignoreSearch: true }).then((hit) =>
+    hit || (req.mode === "navigate" ? caches.match("index.html") : undefined)
+  );
+}
+
+function networkFirst(event, req) {
+  const net = fetch(req.url, { cache: "no-cache", credentials: "same-origin" }).then((res) => {
+    if (res && res.ok) {
+      const copy = res.clone();
+      event.waitUntil(caches.open(CACHE).then((c) => c.put(req, copy)));
+    }
+    return res;
+  });
+  // слабкий інтернет у залі: через 3 с віддаємо збережену копію
+  const slow = new Promise((resolve) => setTimeout(resolve, 3000)).then(() => fromCache(req));
+  return Promise.race([net.catch(() => fromCache(req)), slow])
+    .then((res) => res || net)
+    .catch(() => fromCache(req));
+}
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+  if (req.mode === "navigate" || FRESH.test(url.pathname)) {
+    event.respondWith(networkFirst(event, req));
+    return;
+  }
   event.respondWith(
-    caches.match(req).then((cached) => {
-      const fetchPromise = fetch(req)
-        .then((res) => {
-          if (res && res.status === 200 && res.type === "basic") {
-            const copy = res.clone();
-            caches.open(CACHE).then((cache) => cache.put(req, copy));
-          }
-          return res;
-        })
-        .catch(() => cached);
-      return cached || fetchPromise;
-    })
+    caches.match(req).then((hit) => hit || fetch(req).then((res) => {
+      if (res && res.ok) {
+        const copy = res.clone();
+        event.waitUntil(caches.open(CACHE).then((c) => c.put(req, copy)));
+      }
+      return res;
+    }))
   );
 });

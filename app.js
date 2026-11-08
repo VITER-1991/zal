@@ -9,7 +9,11 @@
   let profile = localStorage.getItem("wa2_profile");
   let selectedDay = null;
   let currentTab = "today";
-  let rest = { running: false, remaining: 0, total: 0, intervalId: null };
+  let rest = { running: false, endAt: 0, total: 0, intervalId: null };
+  let renderedDate = null;   // дата, з якою намальовано екран «Сьогодні»
+  let dayDoneCount = 0;      // скільки вправ було виконано, щоб тост «завершено» не повторювався
+  let pendingReload = false; // нова версія застосунку чекає кінця відпочинку
+  let audioCtx = null;
 
   const $ = (sel, root) => (root || document).querySelector(sel);
   const $all = (sel, root) => Array.from((root || document).querySelectorAll(sel));
@@ -18,12 +22,21 @@
   const nowDayId = () => DAY_IDS[new Date().getDay()];
   const fmtDate = (s) => { const [, m, d] = s.split("-"); return `${d}.${m}`; };
   const round5 = (v) => Math.round(v / 5) * 5;
+  const parseNum = (s) => { const v = parseFloat(String(s == null ? "" : s).replace(",", ".")); return isNaN(v) ? null : v; };
+  const isISO = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(new Date(s + "T00:00:00"));
+  const isNumOrNull = (v) => v == null || (typeof v === "number" && isFinite(v));
+  // номер дня без годинника — щоб перехід на літній/зимовий час не з'їдав годину
+  const dayNum = (s) => { const [y, m, d] = s.split("-").map(Number); return Math.round(Date.UTC(y, m - 1, d) / 86400000); };
+  const hasReps = (e) => Array.isArray(e.reps) && e.reps.some((r) => r != null);
 
   // ---------- storage ----------
   function lsGet(key, fallback) {
     try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; }
   }
-  function lsSet(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {} }
+  function lsSet(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); return true; }
+    catch (e) { toast("Не вдалось зберегти — пам'ять заповнена. Зроби експорт у ⚙️"); return false; }
+  }
   const logKey = (p) => "wa2_log_" + p;
   const bodyKey = (p) => "wa2_body_" + p;
   const metaKey = (p) => "wa2_meta_" + p;
@@ -31,7 +44,13 @@
   const saveLog = (log) => lsSet(logKey(profile), log);
   const getBody = () => lsGet(bodyKey(profile), []);
   const saveBody = (arr) => lsSet(bodyKey(profile), arr);
-  const getMeta = () => lsGet(metaKey(profile), { startDate: mondayOf(new Date()) });
+  function getMeta() {
+    const m = lsGet(metaKey(profile), null);
+    if (m && isISO(m.startDate)) return m;
+    const fixed = { startDate: defaultStart() };
+    saveMeta(fixed);
+    return fixed;
+  }
   const saveMeta = (m) => lsSet(metaKey(profile), m);
 
   function mondayOf(d) {
@@ -39,12 +58,18 @@
     x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
     return iso(x);
   }
+  // старт програми: понеділок цього тижня, а у суботу й неділю — наступний понеділок
+  function defaultStart() {
+    const d = new Date();
+    if (d.getDay() === 6 || d.getDay() === 0) d.setDate(d.getDate() + (d.getDay() === 6 ? 2 : 1));
+    return mondayOf(d);
+  }
 
   function getEntry(exId, date) {
     return (getLog()[exId] || []).find((e) => e.date === date) || null;
   }
   function history(exId) {
-    return (getLog()[exId] || []).filter((e) => e.reps.some((r) => r != null) || e.weight != null)
+    return (getLog()[exId] || []).filter(hasReps)
       .sort((a, b) => (a.date < b.date ? -1 : 1));
   }
   function lastBefore(exId, date, skipDeload) {
@@ -63,9 +88,7 @@
 
   // ---------- week / cycle ----------
   function weekNumber() {
-    const start = new Date(getMeta().startDate + "T00:00:00");
-    const now = new Date(todayISO() + "T00:00:00");
-    return Math.max(1, Math.floor((now - start) / 86400000 / 7) + 1);
+    return Math.max(1, Math.floor((dayNum(todayISO()) - dayNum(getMeta().startDate)) / 7) + 1);
   }
   const isDeload = () => weekNumber() % 6 === 0;
   const cycleNo = () => Math.ceil(weekNumber() / 6);
@@ -88,7 +111,16 @@
       .catch(() => {
         document.body.innerHTML = '<div class="empty-state"><span class="emoji">⚠️</span>Не вдалось завантажити програму.</div>';
       });
-    if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+    if ("serviceWorker" in navigator) {
+      const hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+      // нова версія активувалась — перезавантажуємось, але не посеред відпочинку
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (!hadController) return;
+        if (rest.running) pendingReload = true;
+        else location.reload();
+      });
+    }
   }
 
   function boot() {
@@ -105,7 +137,7 @@
   function selectProfile(p) {
     profile = p;
     localStorage.setItem("wa2_profile", p);
-    if (!lsGet(metaKey(p), null)) saveMeta({ startDate: mondayOf(new Date()) });
+    if (!lsGet(metaKey(p), null)) saveMeta({ startDate: defaultStart() });
     showMain();
   }
 
@@ -115,6 +147,7 @@
     $all(".screen").forEach((s) => s.classList.add("hidden"));
     $("#main").classList.remove("hidden");
     currentTab = "today";
+    renderedDate = todayISO();
     setActiveTabBtn();
     renderProfileChip();
     const today = nowDayId();
@@ -169,8 +202,15 @@
   // ---------- exercise logic ----------
   const planSets = (ex) => (ex.unit === "done" ? 1 : isDeload() ? Math.min(2, ex.n) : ex.n);
 
+  // вправи «до відмови» з допомогою: коли всі підходи по 12+ — менше допомоги
+  const FAILURE_ASSIST_TOP = 12;
   function allTop(entry, ex) {
-    if (ex.hi == null || !entry) return false;
+    if (!entry) return false;
+    if (ex.hi == null) {
+      if (ex.load !== "assist") return false;
+      const r = entry.reps.slice(0, ex.n);
+      return r.length >= ex.n && r.every((v) => v != null && v >= FAILURE_ASSIST_TOP);
+    }
     const r = entry.reps.slice(0, ex.n);
     return r.length >= ex.n && r.every((v) => v != null && v >= ex.hi);
   }
@@ -182,19 +222,23 @@
     if (isDeload()) {
       const base = lastBefore(ex.id, date, true);
       if (!base || base.weight == null) return { value: "", hint: "deload: легка вага, по 2 підходи" };
-      const v = ex.load === "assist" ? round5(base.weight * 1.4) : round5(base.weight * 0.6);
+      const v = ex.load === "assist" ? Math.max(ex.step, round5(base.weight * 1.4)) : round5(base.weight * 0.6);
       return { value: v, hint: `deload: ${ex.load === "assist" ? "+40% допомоги" : "−40%"} від ${base.weight} ${unit}` };
     }
     const last = lastBefore(ex.id, date, true);
     if (!last || last.weight == null) return { value: "", hint: "", first: true };
     const repsTxt = last.reps.filter((r) => r != null).join("/");
     const lastTxt = `минулого разу ${last.weight} ${unit}${repsTxt ? " × " + repsTxt : ""}`;
+    if (ex.load === "assist" && last.weight <= 0 && allTop(last, ex)) {
+      return { value: 0, hint: `${lastTxt} — допомога вже 0, переходь на вправу без гравітрона`, up: true };
+    }
     if (allTop(last, ex) && weekNumber() >= 3) {
       const v = ex.load === "assist" ? Math.max(0, last.weight - ex.step) : last.weight + ex.step;
       const d = ex.load === "assist" ? `−${ex.step} lb допомоги` : `+${ex.step} lb`;
       return { value: v, hint: `${lastTxt} — усі на верхній межі, ${d}`, up: true };
     }
     if (allTop(last, ex)) return { value: last.weight, hint: `${lastTxt} — верхня межа, можна додати`, up: true };
+    if (ex.hi == null && ex.unit === "reps") return { value: last.weight, hint: `${lastTxt} — спробуй хоч на 1 повтор більше` };
     return { value: last.weight, hint: lastTxt };
   }
 
@@ -232,6 +276,7 @@
     const date = todayISO();
     const exs = dayExercises(day);
     const doneCount = exs.filter((ex) => isExDone(ex, getEntry(ex.id, date))).length;
+    dayDoneCount = doneCount;
 
     const head = document.createElement("div");
     head.className = "day-head";
@@ -287,7 +332,8 @@
     const n = exs.filter((ex) => isExDone(ex, getEntry(ex.id, todayISO()))).length;
     const el = $("#dayProgress");
     if (el) el.textContent = `${n}/${exs.length} вправ`;
-    if (n === exs.length) toast("Тренування завершено! Шейк і сніданок 🥤");
+    if (n === exs.length && dayDoneCount < exs.length) toast("Тренування завершено! Шейк і сніданок 🥤");
+    dayDoneCount = n;
   }
 
   function renderExerciseCard(ex, date, day, next) {
@@ -323,20 +369,22 @@
       wRow.innerHTML = `
         <div class="weight-box">
           <button class="w-dec" aria-label="менше">−</button>
-          <input class="w-input" type="number" inputmode="decimal" value="${weightVal}" placeholder="—">
+          <input class="w-input" type="text" inputmode="decimal" autocomplete="off" value="${weightVal}" placeholder="—">
           <button class="w-inc" aria-label="більше">+</button>
         </div>
         <span class="weight-unit">${ex.load === "assist" ? "lb допомоги" : "lb"}</span>
       `;
       body.appendChild(wRow);
       const input = $(".w-input", wRow);
+      // вагу пишемо в журнал лише якщо вже є підходи; інакше вона піде разом із першим підходом
       const commit = () => {
-        const v = parseFloat(input.value);
-        upsert(ex.id, date, { weight: isNaN(v) ? null : v });
+        if (staleDay(date)) return;
+        const e = getEntry(ex.id, date);
+        if (e && hasReps(e)) upsert(ex.id, date, { weight: parseNum(input.value) });
       };
       input.addEventListener("change", commit);
-      $(".w-dec", wRow).onclick = () => { input.value = Math.max(0, (parseFloat(input.value) || 0) - ex.step); commit(); };
-      $(".w-inc", wRow).onclick = () => { input.value = (parseFloat(input.value) || 0) + ex.step; commit(); };
+      $(".w-dec", wRow).onclick = () => { input.value = Math.max(0, (parseNum(input.value) || 0) - ex.step); commit(); };
+      $(".w-inc", wRow).onclick = () => { input.value = (parseNum(input.value) || 0) + ex.step; commit(); };
       card._weightInput = input;
       const hint = document.createElement("div");
       hint.className = "last-weight" + (sug.up ? " up" : "");
@@ -363,6 +411,7 @@
       b.className = "set-chip wide" + (done ? " done" : "");
       b.textContent = done ? "✓ Виконано" : "Позначити виконаним";
       b.onclick = () => {
+        if (staleDay(date)) return;
         upsert(ex.id, date, { reps: done ? [] : [1] });
         renderSetChips(track, ex, date, card, next);
         card.classList.toggle("done", !done);
@@ -388,7 +437,16 @@
     }
   }
 
+  // екран намальовано вчора (iOS відновив застосунок з пам'яті) — не пишемо на стару дату
+  function staleDay(date) {
+    if (date === todayISO()) return false;
+    showMain();
+    toast("Новий день — оновив екран, тисни ще раз");
+    return true;
+  }
+
   function setRep(ex, date, i, val, track, card, next, isNew) {
+    if (staleDay(date)) return;
     const entry = getEntry(ex.id, date) || { reps: [] };
     const reps = entry.reps.slice();
     while (reps.length < i) reps.push(null);
@@ -396,8 +454,8 @@
     while (reps.length && reps[reps.length - 1] == null) reps.pop();
     const patch = { reps };
     if (card._weightInput) {
-      const w = parseFloat(card._weightInput.value);
-      if (!isNaN(w)) patch.weight = w;
+      const w = parseNum(card._weightInput.value);
+      if (w != null) patch.weight = w;
     }
     upsert(ex.id, date, patch);
     renderSetChips(track, ex, date, card, next);
@@ -406,7 +464,8 @@
     if (isNew && val != null) {
       if (navigator.vibrate) navigator.vibrate(20);
       const lastSet = i === planSets(ex) - 1;
-      if (next) startRest(ex.restSec, `Далі ${next.code} · ${next.name}`);
+      const nextDone = next && isExDone(next, getEntry(next.id, date));
+      if (next && !(lastSet && nextDone)) startRest(ex.restSec, `Далі ${next.code} · ${next.name}`);
       else if (ex.restSec && !lastSet) startRest(ex.restSec, `Відпочинок · ${ex.name}`);
       if (ex.unit === "reps" && ex.hi != null && val < ex.lo) toast("Менше за нижню межу — наступного разу зменш вагу");
     }
@@ -443,35 +502,89 @@
   }
 
   // ---------- rest timer ----------
+  // Час рахуємо від годинника, а не тиками: після блокування екрана таймер показує правду.
+  const restRemaining = () => Math.max(0, Math.ceil((rest.endAt - Date.now()) / 1000));
   function startRest(sec, label) {
     clearInterval(rest.intervalId);
     rest.running = true;
     rest.total = sec;
-    rest.remaining = sec;
+    rest.endAt = Date.now() + sec * 1000;
     $("#restBar").classList.remove("hidden");
+    document.body.classList.add("resting");
     $("#restLabel").textContent = label;
     renderRest();
-    rest.intervalId = setInterval(() => {
-      rest.remaining--;
-      renderRest();
-      if (rest.remaining <= 0) finishRest(true);
-    }, 1000);
+    rest.intervalId = setInterval(tickRest, 250);
+  }
+  function tickRest() {
+    if (!rest.running) return;
+    renderRest();
+    if (restRemaining() <= 0) finishRest(true);
   }
   function renderRest() {
-    $("#restTime").textContent = Math.max(0, rest.remaining);
-    $("#restProgress").style.width = Math.max(0, (rest.remaining / rest.total) * 100) + "%";
+    const left = restRemaining();
+    $("#restTime").textContent = left;
+    $("#restProgress").style.width = Math.max(0, (left / rest.total) * 100) + "%";
   }
   function finishRest(natural) {
     clearInterval(rest.intervalId);
     rest.running = false;
     $("#restBar").classList.add("hidden");
-    if (natural && navigator.vibrate) navigator.vibrate([80, 60, 80]);
+    document.body.classList.remove("resting");
+    if (natural) {
+      beep();
+      if (navigator.vibrate) navigator.vibrate([80, 60, 80]);
+    }
+    if (pendingReload) location.reload();
   }
   function adjustRest(delta) {
     if (!rest.running) return;
-    rest.remaining = Math.max(0, rest.remaining + delta);
-    rest.total = Math.max(rest.total, rest.remaining);
-    renderRest();
+    rest.endAt = Math.max(Date.now(), rest.endAt + delta * 1000);
+    rest.total = Math.max(rest.total, restRemaining());
+    tickRest();
+  }
+
+  // iPhone не вібрує з браузера, тож кінець відпочинку — коротким сигналом.
+  // Звук дозволяється лише після дотику, тому «будимо» його на кожному натисканні.
+  function unlockAudio() {
+    try {
+      if (!audioCtx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        audioCtx = new AC();
+      }
+      if (audioCtx.state === "suspended") audioCtx.resume();
+    } catch (e) {}
+  }
+  function beep() {
+    if (!audioCtx || document.hidden) return;
+    try {
+      const t = audioCtx.currentTime;
+      [0, 0.28].forEach((off) => {
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.frequency.value = 880;
+        g.gain.setValueAtTime(0.0001, t + off);
+        g.gain.exponentialRampToValueAtTime(0.5, t + off + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + off + 0.2);
+        o.connect(g);
+        g.connect(audioCtx.destination);
+        o.start(t + off);
+        o.stop(t + off + 0.22);
+      });
+    } catch (e) {}
+  }
+
+  // Повернулись у застосунок: оновити таймер, а якщо настав новий день — перемалювати.
+  function onResume() {
+    if (document.hidden) return;
+    if (rest.running) tickRest();
+    if (P && profile && P[profile] && renderedDate && renderedDate !== todayISO()) {
+      if (currentTab === "today") showMain();
+      else { renderedDate = todayISO(); showTab(currentTab); }
+    }
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) {
+      navigator.serviceWorker.getRegistration().then((r) => r && r.update()).catch(() => {});
+    }
   }
 
   // ---------- exercise sheet ----------
@@ -506,8 +619,8 @@
     $("#settingsContent").innerHTML = `
       <div class="section-title">Профіль</div>
       <div class="settings-row"><span>${prog().name}</span><button id="switchProfileBtn">Змінити</button></div>
-      <div class="settings-row"><span>Старт програми (понеділок)</span><input id="startDateInput" type="date" value="${meta.startDate}"></div>
-      <div class="settings-row"><span>Тиждень · цикл</span><span>${weekNumber()} · ${cycleNo()}</span></div>
+      <div class="settings-row"><span>Старт програми (понеділок)</span><input id="startDateInput" type="date" value="${esc(meta.startDate)}"></div>
+      <div class="settings-row"><span>Тиждень · цикл</span><span id="weekCycle">${weekNumber()} · ${cycleNo()}</span></div>
       <div class="section-title">Резервна копія</div>
       <div class="settings-row"><span>Зберегти журнал у файл</span><button id="exportBtn">Експорт</button></div>
       <div class="settings-row"><span>Відновити з файлу</span><button id="importBtn">Імпорт</button></div>
@@ -523,20 +636,32 @@
       showOnboard();
     };
     $("#startDateInput").onchange = (e) => {
-      if (!e.target.value) return;
-      saveMeta({ startDate: e.target.value });
+      if (!isISO(e.target.value)) return;
+      const mon = mondayOf(new Date(e.target.value + "T00:00:00"));
+      saveMeta({ startDate: mon });
+      if (mon !== e.target.value) { e.target.value = mon; toast(`Старт — завжди понеділок: ${fmtDate(mon)}`); }
+      $("#weekCycle").textContent = `${weekNumber()} · ${cycleNo()}`;
       renderBanner();
       renderDay();
     };
     $("#exportBtn").onclick = () => {
       const payload = { app: "veeter", profile, meta: getMeta(), log: getLog(), body: getBody() };
+      const name = `veeter-${profile}-${todayISO()}.json`;
       const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+      // на iPhone надійніше через «Поділитися» → «Зберегти у Файли»
+      try {
+        const file = new File([blob], name, { type: "application/json" });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          navigator.share({ files: [file], title: name }).catch(() => {});
+          return;
+        }
+      } catch (err) {}
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `veeter-${profile}-${todayISO()}.json`;
+      a.download = name;
       a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
     };
     $("#importBtn").onclick = () => $("#importFile").click();
     $("#importFile").onchange = (e) => {
@@ -545,12 +670,14 @@
       f.text().then((t) => {
         let d;
         try { d = JSON.parse(t); } catch (err) { toast("Файл не схожий на копію журналу"); return; }
-        if (d.app !== "veeter" || !d.log) { toast("Файл не схожий на копію журналу"); return; }
+        const log = d && d.app === "veeter" ? cleanLog(d.log) : null;
+        const body = log ? cleanBody(d.body) : null;
+        if (!log || !body) { toast("Файл не схожий на копію журналу"); return; }
         if (d.profile !== profile && !confirm(`Це копія профілю «${(P[d.profile] || {}).name || d.profile}». Завантажити в «${prog().name}»?`)) return;
         if (!confirm("Замінити поточний журнал даними з файлу?")) return;
-        saveLog(d.log);
-        saveBody(d.body || []);
-        if (d.meta) saveMeta(d.meta);
+        saveLog(log);
+        saveBody(body);
+        if (d.meta && isISO(d.meta.startDate)) saveMeta({ startDate: mondayOf(new Date(d.meta.startDate + "T00:00:00")) });
         overlay.classList.add("hidden");
         showMain();
         toast("Журнал відновлено");
@@ -568,12 +695,39 @@
     $("#closeSettingsBtn").onclick = () => overlay.classList.add("hidden");
   }
 
+  // Пропускаємо в журнал лише числа й дати потрібного формату — зламаний файл нічого не зламає.
+  function cleanLog(log) {
+    if (!log || typeof log !== "object" || Array.isArray(log)) return null;
+    const out = {};
+    for (const [id, arr] of Object.entries(log)) {
+      if (!Array.isArray(arr)) return null;
+      out[id] = arr
+        .filter((e) => e && isISO(e.date) && isNumOrNull(e.weight) && Array.isArray(e.reps) && e.reps.every(isNumOrNull))
+        .map((e) => ({ date: e.date, weight: e.weight == null ? null : e.weight, reps: e.reps.map((r) => (r == null ? null : r)), deload: !!e.deload }));
+    }
+    return out;
+  }
+  function cleanBody(body) {
+    if (body == null) return [];
+    if (!Array.isArray(body)) return null;
+    return body
+      .filter((e) => e && isISO(e.date) && isNumOrNull(e.weight) && isNumOrNull(e.waist) && isNumOrNull(e.hips))
+      .map((e) => {
+        const o = { date: e.date };
+        ["weight", "waist", "hips"].forEach((k) => { if (e[k] != null) o[k] = e[k]; });
+        return o;
+      });
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
   // ---------- progress ----------
   function renderProgress() {
     const content = $("#progressContent");
     const log = getLog();
     const dates = new Set();
-    Object.values(log).forEach((arr) => arr.forEach((e) => { if (e.reps.some((r) => r != null)) dates.add(e.date); }));
+    Object.values(log).forEach((arr) => Array.isArray(arr) && arr.forEach((e) => { if (e && hasReps(e)) dates.add(e.date); }));
     const weekStart = mondayOf(new Date());
     const thisWeek = [...dates].filter((d) => d >= weekStart).length;
 
@@ -601,7 +755,9 @@
   }
 
   function progressCard(ex) {
-    const h = history(ex.id);
+    const all = history(ex.id);
+    const work = all.filter((e) => !e.deload);
+    const h = work.length ? work : all;
     const useWeight = ex.load !== "none" && h.some((e) => e.weight != null);
     const pts = useWeight
       ? h.filter((e) => e.weight != null).map((e) => e.weight)
@@ -655,7 +811,7 @@
     const arr = getBody().slice().sort((a, b) => (a.date < b.date ? -1 : 1));
     const last = arr.length ? arr[arr.length - 1] : null;
     const isFri = nowDayId() === "fri";
-    const field = (id, ph, label) => `<label class="body-field"><span>${label}</span><input id="${id}" type="number" inputmode="decimal" placeholder="${ph}"></label>`;
+    const field = (id, ph, label) => `<label class="body-field"><span>${label}</span><input id="${id}" type="text" inputmode="decimal" autocomplete="off" placeholder="${esc(ph)}"></label>`;
 
     content.innerHTML = `
       <div class="section-title">Заміри · ${isFri ? "сьогодні п'ятниця — зважся до залу" : "раз на тиждень, у п'ятницю до залу"}</div>
@@ -692,7 +848,7 @@
     }
 
     $("#bodySaveBtn").onclick = () => {
-      const num = (id) => { const el = $("#" + id); if (!el) return null; const v = parseFloat(el.value); return isNaN(v) ? null : v; };
+      const num = (id) => { const el = $("#" + id); return el ? parseNum(el.value) : null; };
       const patch = { weight: num("bwInput"), waist: num("waistInput"), hips: num("hipsInput") };
       if (patch.weight == null && patch.waist == null && patch.hips == null) return;
       const list = getBody();
@@ -761,6 +917,10 @@
     ["sheetOverlay", "settingsOverlay", "pickerOverlay"].forEach((id) => {
       $("#" + id).addEventListener("click", (e) => { if (e.target.id === id) e.target.classList.add("hidden"); });
     });
+    document.addEventListener("pointerdown", unlockAudio, { passive: true });
+    document.addEventListener("visibilitychange", onResume);
+    window.addEventListener("pageshow", onResume);
+    window.addEventListener("focus", onResume);
     $("#restSkip").onclick = () => finishRest(false);
     $("#restPlus").onclick = () => adjustRest(15);
     $("#restMinus").onclick = () => adjustRest(-15);
