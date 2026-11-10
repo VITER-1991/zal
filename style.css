@@ -245,3 +245,16 @@ body.resting .day-content{padding-bottom:calc(230px + var(--safe-bottom));}
 input, textarea{user-select:text;}
 .sched .nutri-row{justify-content:flex-start; gap:12px;}
 .sched .nutri-row span:last-child{flex:1; text-align:left;}
+
+/* weight sheet + quick confirm */
+.w-edit{margin-left:auto; background:none; border:1px solid var(--border); color:var(--muted); border-radius:9px; padding:7px 10px; font-size:12px; font-weight:700;}
+.weight-box input{cursor:pointer;}
+.ws-val{display:flex; align-items:baseline; justify-content:center; gap:8px; margin:6px 0 16px;}
+.ws-val input{width:150px; text-align:center; font-size:44px; font-weight:800; background:var(--card); border:1px solid var(--border); border-radius:14px; color:var(--text); padding:6px 0;}
+.ws-val span{color:var(--muted); font-size:15px; font-weight:600;}
+.ws-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:16px;}
+.ws-grid button{height:54px; border-radius:12px; border:1px solid var(--border); background:var(--card); color:var(--text); font-size:18px; font-weight:800;}
+.ws-grid button.plus{color:var(--accent2); border-color:#24584a;}
+.ws-grid button.minus{color:#ff9b9b; border-color:#5a2530;}
+.picker-quick{width:100%; height:56px; margin-bottom:14px; border-radius:14px; border:none; background:var(--accent2); color:#063; font-size:18px; font-weight:800;}
+.picker-grid button.sug{outline:2px solid var(--accent2); outline-offset:-2px;}

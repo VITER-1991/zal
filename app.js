@@ -22,6 +22,7 @@
   const nowDayId = () => DAY_IDS[new Date().getDay()];
   const fmtDate = (s) => { const [, m, d] = s.split("-"); return `${d}.${m}`; };
   const round5 = (v) => Math.round(v / 5) * 5;
+  const fmtW = (v) => (v == null || v === "" ? "" : String(Math.round(Number(v) * 10) / 10));
   const parseNum = (s) => { const v = parseFloat(String(s == null ? "" : s).replace(",", ".")); return isNaN(v) ? null : v; };
   const isISO = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(new Date(s + "T00:00:00"));
   const isNumOrNull = (v) => v == null || (typeof v === "number" && isFinite(v));
@@ -369,22 +370,25 @@
       wRow.innerHTML = `
         <div class="weight-box">
           <button class="w-dec" aria-label="менше">−</button>
-          <input class="w-input" type="text" inputmode="decimal" autocomplete="off" value="${weightVal}" placeholder="—">
+          <input class="w-input" type="text" readonly inputmode="none" value="${fmtW(weightVal)}" placeholder="—">
           <button class="w-inc" aria-label="більше">+</button>
         </div>
         <span class="weight-unit">${ex.load === "assist" ? "lb допомоги" : "lb"}</span>
+        <button class="w-edit">точно ›</button>
       `;
       body.appendChild(wRow);
       const input = $(".w-input", wRow);
-      // вагу пишемо в журнал лише якщо вже є підходи; інакше вона піде разом із першим підходом
+      // Вагу записуємо одразу. Запис без підходів не заважає прогресії: history() бере лише дні з підходами.
       const commit = () => {
         if (staleDay(date)) return;
-        const e = getEntry(ex.id, date);
-        if (e && hasReps(e)) upsert(ex.id, date, { weight: parseNum(input.value) });
+        upsert(ex.id, date, { weight: parseNum(input.value) });
       };
-      input.addEventListener("change", commit);
-      $(".w-dec", wRow).onclick = () => { input.value = Math.max(0, (parseNum(input.value) || 0) - ex.step); commit(); };
-      $(".w-inc", wRow).onclick = () => { input.value = (parseNum(input.value) || 0) + ex.step; commit(); };
+      const setW = (v) => { input.value = fmtW(v == null ? null : Math.max(0, Math.round(v * 10) / 10)); commit(); };
+      $(".w-dec", wRow).onclick = () => setW((parseNum(input.value) || 0) - ex.step);
+      $(".w-inc", wRow).onclick = () => setW((parseNum(input.value) || 0) + ex.step);
+      const openW = () => openWeightSheet(ex, parseNum(input.value), setW);
+      input.onclick = openW;
+      $(".w-edit", wRow).onclick = openW;
       card._weightInput = input;
       const hint = document.createElement("div");
       hint.className = "last-weight" + (sug.up ? " up" : "");
@@ -427,11 +431,10 @@
       b.innerHTML = v != null
         ? `<b>${v}</b><small>${UNIT_LABEL[ex.unit]}</small>`
         : `<span class="n">${i + 1}</span><small>${targetTxt(ex)}</small>`;
+      // Підхід записуємо, коли його вже зроблено: питаємо, скільки вийшло (ціль підсвічена — один дотик).
       b.onclick = () => {
-        if (v != null) { openPicker(ex, i, v, (val) => setRep(ex, date, i, val, track, card, next, false)); return; }
-        const dv = defaultValue(ex, i);
-        if (dv == null) { openPicker(ex, i, null, (val) => setRep(ex, date, i, val, track, card, next, true)); return; }
-        setRep(ex, date, i, dv, track, card, next, true);
+        if (v != null) { openPicker(ex, i, v, null, (val) => setRep(ex, date, i, val, track, card, next, false)); return; }
+        openPicker(ex, i, null, defaultValue(ex, i), (val) => setRep(ex, date, i, val, track, card, next, true));
       };
       track.appendChild(b);
     }
@@ -466,14 +469,53 @@
       const lastSet = i === planSets(ex) - 1;
       const nextDone = next && isExDone(next, getEntry(next.id, date));
       if (next && !(lastSet && nextDone)) startRest(ex.restSec, `Далі ${next.code} · ${next.name}`);
-      else if (ex.restSec && !lastSet) startRest(ex.restSec, `Відпочинок · ${ex.name}`);
+      else if (!lastSet) { if (ex.restSec) startRest(ex.restSec, `Відпочинок · ${ex.name}`); }
+      else {
+        // останній підхід вправи — відпочинок перед наступною невиконаною вправою дня
+        const up = nextUndone(ex, next, date);
+        if (up) startRest(ex.restSec || 90, `Далі ${up.code} · ${up.name}`);
+      }
       if (ex.unit === "reps" && ex.hi != null && val < ex.lo) toast("Менше за нижню межу — наступного разу зменш вагу");
     }
     updateDayProgress();
   }
 
+  function nextUndone(ex, partner, date) {
+    const day = prog().days.find((d) => d.id === selectedDay);
+    if (!day) return null;
+    const list = dayExercises(day);
+    const from = list.findIndex((x) => x.id === ex.id);
+    const order = list.slice(from + 1).concat(list.slice(0, from));
+    return order.find((x) => x.id !== ex.id && (!partner || x.id !== partner.id) && !isExDone(x, getEntry(x.id, date))) || null;
+  }
+
+  // ---------- weight sheet ----------
+  function openWeightSheet(ex, current, onSet) {
+    const overlay = $("#pickerOverlay");
+    const unit = ex.load === "assist" ? "lb допомоги" : "lb";
+    const steps = [-10, -5, -1, -0.5, 0.5, 1, 5, 10];
+    $("#pickerContent").innerHTML = `
+      <div class="picker-title">Вага</div>
+      <div class="picker-sub">${ex.name}</div>
+      <div class="ws-val"><input id="wsInput" type="text" inputmode="decimal" autocomplete="off" value="${fmtW(current)}" placeholder="0"><span>${unit}</span></div>
+      <div class="ws-grid">${steps.map((s) => `<button data-s="${s}" class="${s < 0 ? "minus" : "plus"}">${s > 0 ? "+" : "−"}${String(Math.abs(s)).replace(".", ",")}</button>`).join("")}</div>
+      <button class="primary-btn" id="wsDone">Готово</button>
+    `;
+    overlay.classList.remove("hidden");
+    const inp = $("#wsInput");
+    $all(".ws-grid button", overlay).forEach((b) => {
+      b.onclick = () => {
+        const v = Math.max(0, Math.round(((parseNum(inp.value) || 0) + parseFloat(b.dataset.s)) * 10) / 10);
+        inp.value = fmtW(v);
+        onSet(v);
+      };
+    });
+    inp.onchange = () => onSet(parseNum(inp.value));
+    $("#wsDone").onclick = () => { onSet(parseNum(inp.value)); overlay.classList.add("hidden"); };
+  }
+
   // ---------- reps picker ----------
-  function openPicker(ex, i, current, onPick) {
+  function openPicker(ex, i, current, suggested, onPick) {
     const overlay = $("#pickerOverlay");
     let values = [];
     if (ex.unit === "sec") for (let s = 10; s <= 90; s += 5) values.push(s);
@@ -483,18 +525,23 @@
       const hi = ex.hi != null ? ex.hi + 4 : 20;
       for (let r = lo; r <= hi; r++) values.push(r);
     }
-    const unitWord = { reps: "повтори", sec: "секунди", m: "метри" }[ex.unit];
+    if (suggested != null && !values.includes(suggested)) values.push(suggested), values.sort((a, b) => a - b);
+    const unitWord = { reps: "повторів", sec: "секунд", m: "метрів" }[ex.unit];
+    const quick = current == null && suggested != null
+      ? `<button class="picker-quick" data-v="${suggested}">✓ ${suggested} ${UNIT_LABEL[ex.unit]}${ex.lo != null ? " — як у цілі" : ""}</button>`
+      : "";
     $("#pickerContent").innerHTML = `
-      <div class="picker-title">Підхід ${i + 1} · ${unitWord}</div>
+      <div class="picker-title">Підхід ${i + 1} · скільки ${unitWord} зробив?</div>
       <div class="picker-sub">${ex.name} · ціль ${targetTxt(ex)}</div>
+      ${quick}
       <div class="picker-grid">${values.map((v) => {
         const inRange = ex.lo != null && v >= ex.lo && v <= ex.hi;
-        return `<button data-v="${v}" class="${v === current ? "cur" : ""}${inRange ? " ok" : ""}">${v}</button>`;
+        return `<button data-v="${v}" class="${v === current ? "cur" : ""}${v === suggested && current == null ? " sug" : ""}${inRange ? " ok" : ""}">${v}</button>`;
       }).join("")}</div>
       ${current != null ? `<button class="picker-clear">Скасувати підхід</button>` : ""}
     `;
     overlay.classList.remove("hidden");
-    $all(".picker-grid button", overlay).forEach((b) => {
+    $all(".picker-grid button, .picker-quick", overlay).forEach((b) => {
       b.onclick = () => { overlay.classList.add("hidden"); onPick(parseInt(b.dataset.v, 10)); };
     });
     const clr = $(".picker-clear", overlay);
@@ -880,7 +927,7 @@
       <ul class="guide-list">${pr.progression.map((b) => `<li>${b}</li>`).join("")}</ul>
       <div class="section-title">Як працює журнал</div>
       <ul class="guide-list">
-        <li>Тисни на квадратик підходу — запишеться ціль або твій минулий результат і стартує таймер.</li>
+        <li>Зробив підхід — тисни на квадратик і вибери, скільки вийшло (ціль підсвічена, вистачить одного дотику). Після цього стартує таймер, навіть після останнього підходу — до наступної вправи.</li><li>Вагу міняй кнопками −/+ або тисни «точно ›»: ±10, ±5, ±1, ±0,5 lb чи введи число.</li>
         <li>Тисни на заповнений квадратик — виправ кількість повторів або скасуй підхід.</li>
         <li>Коли всі підходи на верхній межі, з тижня 3 застосунок сам підставить нову вагу за правилом вище (у гравітроні — менше допомоги).</li>
         <li>Кожен 6-й тиждень — deload: 2 підходи і вага −40% підставляються автоматично.</li>
