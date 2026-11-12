@@ -1,277 +1,473 @@
+/* ============ Плазма: токени ============ */
 :root{
-  --bg:#121418; --bg2:#1a1d23; --card:#1f232a; --card2:#262b33;
-  --text:#f2f3f5; --muted:#9aa2ad; --accent:#ff6b35; --accent2:#4fd1a5;
-  --danger:#ff5566; --border:#2d323b; --radius:16px;
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  color-scheme:dark; /* нативні частини (клавіатура, діалоги, вибір файла, дата) — темні */
+  /* колір (спека §4.1) */
+  --bg:#000000;
+  --surface-1:#151517;
+  --surface-2:#1F1F23;
+  --surface-3:#2A2A2F;
+  --line:#2A2A2F;
+  --text:#F5F5F7;
+  --text-2:#8E8E93;
+  --text-off:#636366;
+  --accent:#B14BFF;
+  --on-accent:#16002B;
+  --accent-tint:#2A1640;
+  --accent-hi:#D29BFF;
+  --rest:#7CE0FF;
+  --on-rest:#042A36;
+  --tile:#FFFFFF;
+  --scrim:rgba(0,0,0,.6);
+
+  /* текст (спека §4.2): скорочення для `font` */
+  --font:-apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+  --t-display:800 32px/1.15 var(--font);
+  --t-num:800 22px/1.2 var(--font);
+  --t-title:700 17px/1.3 var(--font);
+  --t-body:400 15px/1.45 var(--font);
+  --t-cap:600 12px/1.3 var(--font);
+  --t-code:700 12px/1.3 var(--font);
+  --t-brand:800 17px/1.3 var(--font); /* напис ZAL у верхній панелі: --t-title жирності 800 (спека §6.1) */
+
+  /* відступи, заокруглення, розміри (спека §4.3) */
+  --s-0:2px; /* крок-волосинка: стик суперсету, компенсація рамки, оптичні зсуви */
+  --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
+  --r-card:20px; --r-box:14px; --r-chip:10px; --r-pill:999px; --r-sheet:28px;
+  --tap:44px;
+  --ease:150ms ease-out;
+  --safe-top:env(safe-area-inset-top, 0px);
+  --safe-bottom:env(safe-area-inset-bottom, 0px);
+  --tabbar-h:56px;
+  --timerbar-h:117px; /* фактична висота смуги таймера (116.8 px в обох станах на 375 і 320) */
 }
+
+/* ============ База ============ */
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
-button{touch-action:manipulation;} /* без затримки й зуму від подвійного дотику */
+/* усі числа — tabular-nums (спека §4.2); !important, бо `font:var(--t-…)` у кожному правилі скидає font-variant-numeric */
+*, *::before, *::after{font-variant-numeric:tabular-nums !important;}
 html,body{height:100%;}
 body{
-  margin:0; background:var(--bg); color:var(--text);
-  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Segoe UI,Roboto,sans-serif;
-  overscroll-behavior-y:none; user-select:none;
+  margin:0; background:var(--bg); color:var(--text); font:var(--t-body);
+  overscroll-behavior-y:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
 }
 #app{height:100%; position:relative;}
-.screen{position:fixed; inset:0; display:flex; flex-direction:column; background:var(--bg);}
+button{font:inherit; color:inherit; touch-action:manipulation;} /* без затримки й зуму від подвійного дотику */
+input, textarea{font:var(--t-title); color:var(--text); -webkit-user-select:text; user-select:text;} /* поле вводу ≥ 17px: iPhone не збільшує сторінку */
 .hidden{display:none !important;}
+.screen{position:fixed; inset:0; display:flex; flex-direction:column; background:var(--bg);}
+.sprite{position:absolute; width:0; height:0; overflow:hidden;} /* поза потоком; розмір 0 стоїть і в атрибутах */
+@media (prefers-reduced-motion: reduce){
+  *{transition:none !important; animation:none !important;}
+}
 
-/* Onboarding */
-.onboard-inner{margin:auto; padding:24px; width:100%; max-width:420px; text-align:center;}
-.onboard-inner h1{font-size:34px; margin-bottom:4px;}
-.muted{color:var(--muted);}
-.small{font-size:12px;}
-.profile-grid{display:flex; gap:12px; margin-top:28px;}
+/* ============ Спільні класи ============ */
+.ic{width:20px; height:20px; flex-shrink:0; fill:none; stroke:currentColor; display:inline-block; vertical-align:middle;}
+.ic.lg{width:24px; height:24px;}
+
+/* кнопки (спека §6.12): за замовчуванням другорядна */
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:var(--s-2);
+  min-height:var(--tap); padding:0 var(--s-4); border:0; border-radius:var(--r-box);
+  background:var(--surface-2); color:var(--text); font:var(--t-title);
+  transition:background-color var(--ease);
+}
+.btn:active{background:var(--surface-3);}
+.btn:disabled{color:var(--text-off);}
+.btn.primary{background:var(--accent); color:var(--on-accent);}
+.btn.primary:active{background:var(--accent-hi);}
+.btn.quiet{background:transparent; color:var(--accent-hi);}
+.btn.quiet:active{background:var(--accent-tint);}
+
+/* пігулки (спека §6.2, §6.4, §6.7) */
+.pill{
+  display:inline-flex; align-items:center; gap:var(--s-1);
+  padding:var(--s-1) var(--s-3); border-radius:var(--r-pill);
+  background:var(--surface-2); color:var(--text-2); font:var(--t-cap); white-space:nowrap;
+}
+.pill.tint{background:var(--accent-tint); color:var(--accent-hi);}
+
+/* ============ Оболонка: вибір профілю (спека §6.18) ============ */
+.onboard-inner{margin:auto; padding:var(--s-6); width:100%; max-width:420px; text-align:center;}
+.onboard-logo{margin:0; font:var(--t-display); letter-spacing:.08em;}
+.onboard-q{margin:var(--s-2) 0 0; color:var(--text-2); font:var(--t-body);}
+.profile-grid{display:flex; flex-direction:column; gap:var(--s-2); margin-top:var(--s-6);}
 .profile-pick{
-  flex:1; background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
-  padding:24px 12px; display:flex; flex-direction:column; gap:6px; align-items:center;
-  color:var(--text); font-size:16px; font-weight:600;
+  display:flex; align-items:center; gap:var(--s-3); min-height:64px; padding:var(--s-4);
+  border:0; border-radius:var(--r-card); background:var(--surface-1); color:var(--text);
+  font:var(--t-title); text-align:left; transition:background-color var(--ease);
 }
-.profile-pick .avatar{font-size:36px;}
-.profile-pick:active{background:var(--card2);}
+.profile-pick .ic{color:var(--accent);}
+.profile-pick:active{background:var(--surface-3);}
 
-/* Topbar */
+/* ============ Оболонка: верхня панель (спека §6.1) ============ */
 .topbar{
-  display:flex; align-items:center; justify-content:space-between;
-  padding:calc(10px + var(--safe-top)) 14px 10px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
+  padding:calc(var(--s-2) + var(--safe-top)) var(--s-4) var(--s-2);
 }
-.brand{font-weight:700; font-size:18px;}
-.icon-btn{background:none; border:none; color:var(--text); font-size:20px; width:40px; height:40px;}
+.brand{font:var(--t-brand); letter-spacing:.08em;}
+.topbar-spacer{width:var(--tap); height:var(--tap); flex-shrink:0;}
+.icon-btn{
+  display:flex; align-items:center; justify-content:center; width:var(--tap); height:var(--tap);
+  border:0; border-radius:var(--r-pill); background:none; color:var(--text);
+  transition:background-color var(--ease);
+}
+.icon-btn:active{background:var(--surface-3);}
 .profile-chip{
-  background:var(--card); border:1px solid var(--border); color:var(--text);
-  border-radius:20px; padding:6px 14px; font-size:14px; font-weight:600; display:flex; align-items:center; gap:6px;
+  display:flex; align-items:center; gap:var(--s-2); min-height:var(--tap); padding:0 var(--s-4);
+  border:0; border-radius:var(--r-pill); background:var(--surface-2); color:var(--text);
+  font:var(--t-body); transition:background-color var(--ease);
 }
+.profile-chip:active{background:var(--surface-3);}
 
-.banner{margin:0 14px 10px; padding:9px 13px; background:var(--card); border:1px solid var(--border); color:var(--muted); border-radius:12px; font-size:12.5px; line-height:1.45; flex-shrink:0;}
-.banner b{color:var(--text);}
-.banner.warn{background:#3a2a16; border-color:#6b4a1f; color:#ffcf8a;}
-.banner.warn b{color:#ffe2b5;}
-
-.day-tabs{display:flex; gap:6px; padding:0 14px 10px; overflow-x:auto; flex-shrink:0;}
-.day-tab{
-  flex-shrink:0; padding:8px 14px; border-radius:20px; background:var(--card); border:1px solid var(--border);
-  color:var(--muted); font-size:13px; font-weight:600; white-space:nowrap; min-height:44px;
-}
-.day-tab.active{background:var(--accent); color:#1a1200; border-color:var(--accent);}
-.day-tab .dot{width:6px; height:6px; border-radius:50%; background:var(--accent2); display:inline-block; margin-left:5px;}
-
-.day-content{flex:1; overflow-y:auto; padding:4px 14px calc(96px + var(--safe-bottom)); -webkit-overflow-scrolling:touch;}
-body.resting .day-content{padding-bottom:calc(230px + var(--safe-bottom));}
-
-.day-intro{color:var(--muted); font-size:13px; margin:4px 2px 14px; line-height:1.5;}
-
-.ex-card{
-  background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
-  padding:14px; margin-bottom:12px;
-}
-.ex-head{display:flex; align-items:center; gap:10px;}
-.ex-thumb{width:52px; height:52px; border-radius:10px; object-fit:cover; background:var(--card2); flex-shrink:0;}
-.ex-meta{flex:1; min-width:0;}
-.ex-name{font-size:15px; font-weight:600; line-height:1.3;}
-.ex-sets{color:var(--accent2); font-size:13px; font-weight:600; margin-top:2px;}
-.ex-note{color:var(--muted); font-size:12px; margin-top:1px;}
-.ex-label{color:var(--muted); font-size:11px; font-weight:700; background:var(--card2); border-radius:6px; padding:2px 6px; flex-shrink:0;}
-
-.ex-body{margin-top:12px; display:flex; flex-direction:column; gap:10px;}
-.sets-track{display:flex; flex-wrap:wrap; gap:6px;}
-.quick-add{display:flex; gap:6px;}
-.quick-add button{
-  background:var(--card2); border:1px solid var(--border); color:var(--accent2); font-size:12px; font-weight:700;
-  padding:6px 10px; border-radius:8px;
-}
-.last-weight{font-size:11px; color:var(--muted);}
-
-.rest-timer-section{display:flex; gap:12px; align-items:center;}
-
-/* Sheet */
-.sheet-overlay{position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:50; display:flex; align-items:flex-end;}
-.sheet{
-  background:var(--bg2); width:100%; max-height:88vh; overflow-y:auto; border-radius:20px 20px 0 0;
-  padding:8px 18px calc(24px + var(--safe-bottom)); overscroll-behavior:contain;
-}
-.sheet{transition:transform .2s;}
-.sheet.dragging{transition:none;}
-.sheet-handle{width:40px; height:4px; background:var(--border); border-radius:4px; margin:4px auto 14px;}
-.sheet img{width:100%; border-radius:12px; background:#fff;}
-.sheet h2{font-size:19px; margin:14px 0 4px;}
-.sheet .caption{color:var(--muted); font-size:12px; margin-bottom:12px;}
-.sheet .step{margin-bottom:12px;}
-.sheet .step b{color:var(--accent2); display:block; font-size:12px; text-transform:uppercase; letter-spacing:.03em; margin-bottom:3px;}
-.sheet .step p{margin:0; font-size:14px; line-height:1.5;}
-.alt-toggle{
-  width:100%; margin-top:6px; padding:12px; border-radius:12px; background:var(--card); border:1px solid var(--border);
-  color:var(--accent); font-weight:700; font-size:14px;
-}
-.close-sheet{
-  width:100%; margin-top:16px; padding:14px; border-radius:12px; background:var(--card2); border:none;
-  color:var(--text); font-weight:700; font-size:15px;
-}
-
-/* Rest bar */
-.rest-bar{
-  position:fixed; left:14px; right:14px; bottom:calc(80px + var(--safe-bottom)); z-index:40;
-  background:var(--accent); border-radius:16px; padding:12px 16px; color:#1a1200;
-  box-shadow:0 8px 24px rgba(0,0,0,.4); overflow:hidden;
-}
-.rest-info{display:flex; justify-content:space-between; align-items:baseline; font-weight:700;}
-#restLabel{font-size:13px;}
-#restTime{font-size:26px; font-variant-numeric:tabular-nums;}
-.rest-actions{display:flex; gap:8px; margin-top:8px;}
-.rest-actions button{
-  flex:1; background:rgba(0,0,0,.18); border:none; border-radius:10px; padding:9px 0; color:#1a1200; font-weight:700; font-size:13px; min-height:44px;
-}
-.rest-progress{position:absolute; left:0; bottom:0; height:3px; background:rgba(0,0,0,.35); transition:width .25s linear;}
-.rest-bar.work{background:var(--accent2); color:#063;}
-.rest-bar.work .rest-actions button{color:#063; font-size:14px; padding:11px 0;}
-
-/* Tabbar */
+/* ============ Оболонка: нижня панель (спека §6.9) ============ */
 .tabbar{
-  position:fixed; left:0; right:0; bottom:0; display:flex; background:var(--bg2); border-top:1px solid var(--border);
-  padding:8px 6px calc(8px + var(--safe-bottom)); z-index:30;
+  position:fixed; left:0; right:0; bottom:0; z-index:30; display:flex;
+  height:calc(var(--tabbar-h) + var(--safe-bottom)); padding:0 0 var(--safe-bottom);
+  background:var(--bg); border-top:1px solid var(--line);
 }
-.tab-btn{flex:1; background:none; border:none; color:var(--muted); font-size:12px; font-weight:600; padding:6px 0; min-height:44px;}
-.tab-btn.active{color:var(--accent);}
+.tab-btn{
+  flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--s-0);
+  min-height:var(--tap); padding:0; border:0; background:none; color:var(--text-2); font:var(--t-cap);
+}
+.tab-btn.active{color:var(--accent-hi);}
+.tab-btn.active .ic{color:var(--accent);}
 
-/* Progress / body / guide content */
-.section-title{font-size:13px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin:18px 2px 8px;}
-.section-title:first-child{margin-top:4px;}
-.stat-grid{display:flex; gap:10px;}
-.stat-card{flex:1; background:var(--card); border:1px solid var(--border); border-radius:14px; padding:14px; text-align:center;}
-.stat-card .v{font-size:22px; font-weight:800; color:var(--accent2);}
-.stat-card .l{font-size:11px; color:var(--muted); margin-top:2px;}
-.hist-card{background:var(--card); border:1px solid var(--border); border-radius:14px; padding:14px; margin-bottom:10px;}
-.hist-card .hname{font-weight:700; font-size:14px; margin-bottom:6px;}
-.hist-card canvas{width:100%; height:70px; display:block;}
-.hist-meta{display:flex; justify-content:space-between; font-size:11px; color:var(--muted); margin-top:4px;}
-.body-input-row{display:flex; gap:10px; align-items:center; background:var(--card); border:1px solid var(--border); border-radius:14px; padding:12px 14px;}
-.body-input-row input{flex:1; background:var(--card2); border:none; border-radius:10px; padding:10px; color:var(--text); font-size:16px; font-weight:700; text-align:center;}
-.body-input-row button{background:var(--accent); border:none; border-radius:10px; padding:10px 16px; color:#1a1200; font-weight:700;}
-.note-card{background:var(--card); border:1px solid var(--border); border-radius:14px; padding:14px; margin-bottom:10px; font-size:13px; line-height:1.55; color:var(--text);}
-.note-card b{color:var(--accent2);}
-.nutri-row{display:flex; justify-content:space-between; font-size:13px; padding:7px 0; border-bottom:1px solid var(--border);}
-.nutri-row:last-child{border-bottom:none;}
-.nutri-row .w{color:var(--muted); flex:1.1;}
-.nutri-row .p{color:var(--accent2); font-weight:700; flex:0.6; text-align:right;}
-.guide-list{padding-left:18px; margin:0; font-size:13px; line-height:1.6; color:var(--text);}
-.guide-list li{margin-bottom:8px;}
-
-.toast{
-  position:fixed; left:50%; top:calc(var(--safe-top) + 12px); transform:translateX(-50%); background:var(--card2); color:var(--text);
-  max-width:calc(100% - 32px); text-align:center;
-  padding:10px 18px; border-radius:30px; font-size:13px; font-weight:600; z-index:60; box-shadow:0 6px 18px rgba(0,0,0,.4);
+/* ============ Оболонка: вміст екрана ============ */
+.day-content{
+  flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch;
+  padding:var(--s-1) var(--s-4) calc(var(--tabbar-h) + var(--safe-bottom) + var(--s-6));
+}
+body.resting .day-content{
+  padding-bottom:calc(var(--tabbar-h) + var(--safe-bottom) + var(--s-6) + var(--timerbar-h));
 }
 
-.empty-state{text-align:center; color:var(--muted); padding:60px 20px; font-size:14px; line-height:1.6;}
-.empty-state .emoji{font-size:40px; display:block; margin-bottom:10px;}
+/* ============ «Сьогодні»: рядок тижня (спека §6.2) ============ */
+.banner{flex-shrink:0; padding:0 var(--s-4) var(--s-3);}
+.banner-row{display:flex; align-items:center; flex-wrap:wrap; gap:var(--s-2); min-height:var(--s-6);}
+.banner-week{color:var(--text-2); font:var(--t-cap);}
+.banner-note{margin-top:var(--s-1); color:var(--text-2); font:var(--t-body);}
 
-.settings-row{display:flex; justify-content:space-between; align-items:center; padding:14px 2px; border-bottom:1px solid var(--border); font-size:14px;}
-.settings-row:last-child{border-bottom:none;}
-.settings-row button{background:var(--card2); border:1px solid var(--border); color:var(--text); border-radius:10px; padding:8px 14px; font-size:13px; font-weight:600;}
-.settings-row button.danger{color:var(--danger); border-color:#5a2530;}
+/* ============ «Сьогодні»: вкладки днів (спека §6.3) ============ */
+.day-tabs{
+  display:flex; gap:var(--s-2); flex-shrink:0; overflow-x:auto; scrollbar-width:none;
+  padding:0 var(--s-4) var(--s-4);
+}
+.day-tabs::-webkit-scrollbar{display:none;}
+.day-tab{
+  flex:1 0 0; min-width:var(--tap); min-height:var(--tap); padding:0 var(--s-2);
+  display:inline-flex; align-items:center; justify-content:center; gap:var(--s-1);
+  border:0; border-radius:var(--r-pill); background:var(--surface-2); color:var(--text-2);
+  font:var(--t-title); white-space:nowrap; transition:background-color var(--ease);
+}
+.day-tab:active{background:var(--surface-3);}
+.day-tab.active{background:var(--accent); color:var(--on-accent);}
+.day-tab .dot{width:6px; height:6px; border-radius:var(--r-pill); background:var(--accent); flex-shrink:0;}
+.day-tab.active .dot{background:var(--on-accent);}
 
-/* VEETER additions */
-.brand-mark{color:var(--accent); font-size:12px; font-weight:800; letter-spacing:.18em;}
-.onboard-inner h1{margin-top:6px;}
-.day-head{margin:2px 2px 6px;}
-.day-title{font-size:24px; font-weight:800;}
-.day-focus{color:var(--muted); font-size:14px; margin-top:2px;}
-.day-meta{display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;}
-.chip{background:var(--card); border:1px solid var(--border); color:var(--muted); border-radius:20px; padding:4px 10px; font-size:12px; font-weight:600;}
-.chip.together{color:var(--accent2); border-color:#24584a;}
-.day-hint{font-size:12px; color:#ffcf8a; margin-top:8px;}
-.block-head{display:flex; justify-content:space-between; align-items:baseline; margin:18px 2px 8px; font-size:14px; font-weight:700;}
-.block-head .time{color:var(--muted); font-size:12px; font-weight:600; font-variant-numeric:tabular-nums;}
-.block-group.superset{border-left:3px solid var(--accent); padding-left:8px; margin-left:-2px;}
-.ex-card.done{border-color:#24584a; background:#1b2924;}
-.ex-card.done .ex-thumb{opacity:.75;}
-.ex-thumb{width:64px; height:52px; object-fit:contain; background:#fff; padding:2px;}
-.ex-code{display:inline-block; font-size:11px; font-weight:800; color:var(--accent); background:rgba(255,107,53,.12); border-radius:5px; padding:1px 5px; margin-right:6px; vertical-align:1px;}
-.ex-note{color:var(--muted); font-weight:500;}
-.ex-tag{display:inline-block; margin-top:4px; font-size:11px; color:#ffcf8a; background:#3a2a16; border-radius:6px; padding:2px 7px;}
-.ex-more{color:var(--muted); font-size:22px; padding-left:4px;}
-.last-weight{line-height:1.4; margin-top:-4px;}
-.last-weight.up{color:var(--accent2); font-weight:600;}
+/* ============ «Сьогодні»: шапка дня (спека §6.4, §5) ============ */
+.day-head{margin:0 0 var(--s-6);}
+.day-title{font:var(--t-display); letter-spacing:-0.02em;}
+.day-focus{margin-top:var(--s-1); color:var(--text-2); font:var(--t-body);}
+.day-meta{display:flex; flex-wrap:wrap; gap:var(--s-2); margin-top:var(--s-3);}
+.pill.clock{color:var(--text);}
+.pill.clock .ic{color:var(--accent);}
+.day-progress{display:flex; align-items:center; gap:var(--s-3); margin-top:var(--s-4);}
+.day-progress .segs{flex:1; min-width:0;}
+#dayProgress{flex-shrink:0; color:var(--text-2); font:var(--t-cap);}
+.day-hint{display:flex; align-items:center; gap:var(--s-2); margin-top:var(--s-3); color:var(--text-2); font:var(--t-cap);}
+
+/* сегменти (спека §5): заповнений --accent, порожній --surface-3 */
+.segs{display:flex; gap:var(--s-1);}
+.seg{flex:1; min-width:0; height:6px; border-radius:var(--r-pill); background:var(--surface-3); transition:background-color var(--ease);}
+.seg.on{background:var(--accent);}
+.seg.cur{background:var(--accent-hi);}
+
+/* завершене тренування і «Завершити тренування» */
+.sess-card{
+  display:flex; align-items:center; gap:var(--s-2); margin:0 0 var(--s-6); padding:var(--s-4);
+  border-radius:var(--r-card); background:var(--surface-1); color:var(--text); font:var(--t-body);
+}
+.sess-card .ic{color:var(--accent);}
+#sessFinish{width:100%; margin-top:var(--s-6);}
+
+/* ============ «Сьогодні»: нотатка і заголовок блоку (спека §6.5, §6.6) ============ */
+.note-card{
+  margin:0 0 var(--s-2); padding:var(--s-4); border-radius:var(--r-card);
+  background:var(--surface-1); color:var(--text-2); font:var(--t-body);
+}
+.note-card b{color:var(--text);} /* <b> лишається жирним за замовчуванням (bolder від 400 = 700) */
+.block-head{
+  display:flex; justify-content:space-between; align-items:baseline; gap:var(--s-3);
+  margin:var(--s-6) 0 var(--s-2); color:var(--text-2); font:var(--t-cap);
+}
+.block-head .time{flex-shrink:0;}
+.block-group .ex-card + .ex-card{margin-top:var(--s-2);}
+/* суперсет: пара впритул, спільні зовнішні кути, без кольорової смуги */
+.block-group.superset .ex-card + .ex-card{margin-top:var(--s-0);}
+.block-group.superset .ex-card:not(:last-child){border-bottom-left-radius:0; border-bottom-right-radius:0;}
+.block-group.superset .ex-card:not(:first-child){border-top-left-radius:0; border-top-right-radius:0;}
+
+/* ============ «Сьогодні»: картка вправи (спека §6.7, §7) ============ */
+.ex-card{padding:var(--s-4); border-radius:var(--r-card); background:var(--surface-1);}
+.ex-head{display:flex; align-items:flex-start; gap:var(--s-3); cursor:pointer;}
+.ex-tile{
+  flex-shrink:0; width:64px; height:52px; overflow:hidden;
+  border-radius:var(--r-box); background:var(--tile);
+}
+.ex-thumb{display:block; width:100%; height:100%; padding:var(--s-0); object-fit:contain;}
+.ex-meta{flex:1; min-width:0;}
+.ex-code{margin-right:var(--s-2); color:var(--accent); font:var(--t-code);}
+.ex-name{font:var(--t-title);}
+.ex-sets{margin-top:var(--s-0); color:var(--text-2); font:var(--t-body);}
+.ex-last{margin-top:var(--s-0); color:var(--text-2); font:var(--t-cap);}
+.ex-tag{margin-top:var(--s-2); white-space:normal;}
+.ex-more{flex-shrink:0; display:flex; align-items:center; height:52px; color:var(--text-2);}
+.ex-card.done .ex-name{color:var(--text-2);}
+.ex-card.done .ex-more{color:var(--accent);}
+.ex-body{display:flex; flex-direction:column; gap:var(--s-3); margin-top:var(--s-4);}
+
+/* віконця «минулого разу» / «зараз» */
+.w-row{display:flex; gap:var(--s-2);}
+.w-prev, .w-now{
+  flex:1; min-width:0; display:flex; flex-direction:column; gap:var(--s-0);
+  padding:var(--s-2) var(--s-3); border-radius:var(--r-box); background:var(--surface-2);
+}
+.w-now{border:2px solid var(--line); padding:calc(var(--s-2) - var(--s-0)) calc(var(--s-3) - var(--s-0));}
+/* фіолетова рамка — лише в активній картці (головний «Старт» або секундомір) і в полі у фокусі; розмір не змінюється */
+.ex-card.active:not(.done) .w-now, .ex-card .w-now:focus-within{border-color:var(--accent);}
+.w-row small{color:var(--text-2); font:var(--t-cap);}
+.w-val{display:flex; flex-wrap:wrap; align-items:baseline; column-gap:var(--s-1); min-width:0;}
+.w-prev b{color:var(--text-2); font:var(--t-num);}
+.w-val i{font-style:normal; color:var(--text-2); font:var(--t-cap); white-space:nowrap;}
+/* поле займає вільне місце, але не вужче за «1000.5»; коли одиниця не влазить — вона йде на другий рядок */
+.w-now .w-input{
+  flex:1 1 0; min-width:3.2em; width:100%; padding:0; border:0; background:none; outline:none;
+  color:var(--text); font:var(--t-num); user-select:text;
+}
+.w-now .w-input::placeholder{color:var(--text-2);}
+
+/* підказка ваги */
+.last-weight{display:flex; align-items:center; gap:var(--s-1); color:var(--text-2); font:var(--t-cap);}
+.last-weight.up{color:var(--accent-hi);}
+
+/* квадратики підходів — великі сегменти (спека §5) */
+.sets-track{display:grid; grid-template-columns:repeat(auto-fit, minmax(52px, 1fr)); gap:var(--s-2);}
 .set-chip{
-  flex:1; min-width:56px; height:46px; border-radius:11px; background:var(--card2); border:1px dashed #3d4450;
-  color:var(--muted); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; padding:0;
+  min-width:0; height:52px; padding:0; border:0; border-radius:var(--r-chip);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0;
+  background:var(--surface-2); color:var(--text-2); white-space:nowrap;
+  transition:background-color var(--ease);
 }
-.set-chip .n{font-size:15px; font-weight:800; color:var(--text);}
-.set-chip small{font-size:10px; font-weight:600;}
-.set-chip.done small{opacity:.8;}
-.set-chip.done{background:var(--accent2); border:1px solid var(--accent2); color:#063;}
-.set-chip.done b{font-size:17px; font-weight:800;}
-.set-chip.wide{flex:1; font-size:14px; font-weight:700; height:42px;}
-.picker-title{font-size:18px; font-weight:800;}
-.picker-sub{color:var(--muted); font-size:13px; margin:3px 0 14px;}
-.picker-grid{display:grid; grid-template-columns:repeat(5,1fr); gap:8px;}
-.picker-grid button{height:48px; border-radius:12px; background:var(--card); border:1px solid var(--border); color:var(--text); font-size:17px; font-weight:700;}
-.picker-grid button.ok{border-color:#24584a; color:var(--accent2);}
-.picker-grid button.cur{background:var(--accent2); color:#063; border-color:var(--accent2);}
-.picker-clear{width:100%; margin-top:14px; padding:13px; border-radius:12px; background:none; border:1px solid #5a2530; color:var(--danger); font-weight:700; font-size:14px;}
-.sheet img{object-fit:contain; max-height:42vh;}
-.sheet h2 .ex-code{font-size:13px;}
-.sheet-sets{color:var(--accent2); font-weight:700; font-size:15px; margin-bottom:12px;}
-.sheet-sets span{color:var(--muted); font-weight:500;}
-.cues{margin:0 0 14px; padding-left:20px; font-size:15px; line-height:1.7;}
-.hist-table{background:var(--card); border:1px solid var(--border); border-radius:14px; padding:4px 14px; margin-bottom:10px;}
-.hrow{display:flex; justify-content:space-between; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); font-size:13px;}
-.hrow:last-child{border-bottom:none;}
-.hrow span:first-child{flex:0 0 72px; color:var(--muted);}
-.hrow span:nth-child(2){flex:1;}
-.hrow .reps{color:var(--accent2); font-weight:700; text-align:right; font-variant-numeric:tabular-nums;}
-.hrow i{font-style:normal; font-size:10px; color:#ffcf8a;}
-.hist-card{cursor:pointer;}
-.hist-meta .good{color:var(--accent2); font-weight:700;}
-.hist-meta .bad{color:#ffcf8a; font-weight:700;}
-.body-card{background:var(--card); border:1px solid var(--border); border-radius:14px; padding:14px; margin-bottom:10px;}
-.body-fields{display:flex; gap:8px;}
-.body-field{flex:1; display:flex; flex-direction:column; gap:5px; font-size:11px; color:var(--muted); font-weight:600;}
-.body-field input{width:100%; background:var(--card2); border:none; border-radius:10px; padding:11px 6px; color:var(--text); font-size:17px; font-weight:700; text-align:center;}
-.primary-btn{width:100%; margin-top:12px; background:var(--accent); border:none; border-radius:12px; padding:13px; color:#1a1200; font-weight:800; font-size:15px;}
-.nutri-row .p.left{text-align:left; flex:0 0 92px;}
-.nutri-row span:first-child{flex:1;}
-.disclaimer{font-size:11px; color:var(--muted); line-height:1.5; margin:14px 2px 0;}
-.table .trow{display:grid; grid-template-columns:78px 1fr 1fr; gap:8px; padding:8px 0; border-bottom:1px solid var(--border); font-size:12.5px; line-height:1.35;}
-.table .trow:last-child{border-bottom:none;}
-.table .trow.th{color:var(--muted); font-weight:700; font-size:11px; text-transform:uppercase;}
-.table .trow span:first-child{color:var(--muted);}
-.table .trow .me{color:var(--text); font-weight:600;}
-.table .trow span:not(.me):not(:first-child){color:var(--muted);}
-.settings-row input[type=date]{background:var(--card2); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:6px;}
-.guide-list b{color:var(--accent2);}
-input, textarea{user-select:text;}
-.sched .nutri-row{justify-content:flex-start; gap:12px;}
-.sched .nutri-row span:last-child{flex:1; text-align:left;}
+.set-chip .n, .set-chip b{color:var(--text); font:var(--t-title);}
+.set-chip small{font:var(--t-cap);}
+.set-chip:active{background:var(--surface-3);}
+.set-chip.cur{border:2px solid var(--line);}
+.ex-card.active:not(.done) .set-chip.cur{border-color:var(--accent);}
+.set-chip.done{background:var(--accent); color:var(--on-accent);}
+.set-chip.done b{color:var(--on-accent);}
+.set-chip.done:active{background:var(--accent-hi);}
+.set-chip.add{color:var(--text);}
+.set-chip.wide{grid-column:1 / -1; flex-direction:row; gap:var(--s-2); color:var(--text); font:var(--t-title);}
+.set-chip.wide .ic{color:var(--text-2);}
+.set-chip.wide.done{color:var(--on-accent);}
+.set-chip.wide.done .ic{color:var(--on-accent);}
 
-/* quick confirm */
-.picker-quick{width:100%; height:56px; margin-bottom:14px; border-radius:14px; border:none; background:var(--accent2); color:#063; font-size:18px; font-weight:800;}
-.picker-grid button.sug{outline:2px solid var(--accent2); outline-offset:-2px;}
-.picker-w{display:flex; flex-direction:column; gap:4px; margin-bottom:14px;}
-.picker-w small{color:var(--muted); font-size:11px; font-weight:600;}
-.picker-w input{width:100%; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px; color:var(--text); font-size:20px; font-weight:800; text-align:center;}
+/* «Старт підходу N» / «Стоп» (спека §6.7, §6.12): за замовчуванням другорядна, головна — одна на екрані */
+.start-set{width:100%; min-height:52px;}
+.start-set.primary{background:var(--accent); color:var(--on-accent);}
+.start-set.primary:active{background:var(--accent-hi);}
+.start-set.stop{background:transparent; border:2px solid var(--accent); color:var(--text);}
+.start-set.stop .ic{color:var(--accent);}
 
-/* картка вправи: «минулого разу» / «зараз» */
-.w-row{display:flex; gap:10px;}
-.w-prev, .w-now{flex:1; min-width:0; background:var(--card2); border-radius:12px; padding:8px 12px; display:flex; flex-direction:column; gap:3px;}
-.w-row small{color:var(--muted); font-size:11px; font-weight:600;}
-.w-prev b{font-size:16px; font-weight:700; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:28px;}
-.w-now{border:1px solid var(--accent2);}
-.w-now span{display:flex; align-items:baseline; gap:6px;}
-.w-now .w-input{flex:1; min-width:0; width:100%; background:none; border:none; padding:0; color:var(--text); font-size:22px; font-weight:800; line-height:28px;}
-.w-now i{font-style:normal; color:var(--muted); font-size:12px; font-weight:600; white-space:nowrap;}
-.ex-last{color:var(--muted); font-size:12px; margin-top:3px;}
-.set-chip{white-space:nowrap;}
-.set-chip.add{flex:0 0 44px; min-width:44px; border-style:solid; color:var(--accent2); font-size:20px; font-weight:800;}
-.start-set{width:100%; margin-top:10px; height:44px; border-radius:12px; border:1px solid var(--accent2); background:none; color:var(--accent2); font-size:15px; font-weight:800; font-variant-numeric:tabular-nums;}
-.start-set.stop{background:var(--accent2); color:#063;}
-.picker-rest{margin-top:4px; color:var(--accent); font-size:14px; font-weight:700; font-variant-numeric:tabular-nums;}
-.chip.clock{color:var(--accent2); border-color:#24584a; font-variant-numeric:tabular-nums;}
-.sess-card{font-weight:700; color:var(--accent2); font-variant-numeric:tabular-nums;}
-#sessFinish{margin-bottom:12px;}
+/* ============ Поля вводу (спека §6.13) ============ */
+.field{
+  min-height:var(--tap); padding:var(--s-2) var(--s-3); border:2px solid transparent; border-radius:var(--r-box);
+  background:var(--surface-2); color:var(--text); font:var(--t-title); outline:none;
+  transition:border-color var(--ease);
+}
+.field.num{width:100%; min-height:52px; font:var(--t-num); text-align:center;}
+.field::placeholder{color:var(--text-2);}
+.field:focus{border-color:var(--accent);}
 
-/* ціль вправи в картці */
-.goal-row{display:flex; gap:10px; margin-bottom:8px;}
-.goal-row label{flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); font-weight:600;}
-.goal-row input{width:100%; box-sizing:border-box; font-size:16px; text-align:center; padding:9px 6px; border-radius:10px; background:var(--card2); color:var(--text); border:1px solid var(--border);}
-.link-btn{background:none; border:none; color:var(--accent2); font-size:14px; font-weight:600; padding:6px 2px; margin-bottom:10px; cursor:pointer;}
+/* ============ Смуга таймера (спека §6.8) ============ */
+/* відпочинок — заливка --rest, підхід (клас work) — заливка --accent; кнопки «навиворіт» */
+.rest-bar{
+  position:fixed; left:var(--s-4); right:var(--s-4); bottom:calc(var(--tabbar-h) + var(--safe-bottom) + var(--s-2)); z-index:40;
+  padding:var(--s-3) var(--s-4) var(--s-4); border-radius:var(--r-card); overflow:hidden;
+  background:var(--rest); color:var(--on-rest);
+}
+.rest-bar.work{background:var(--accent); color:var(--on-accent);}
+.rest-info{display:flex; align-items:baseline; gap:var(--s-3);}
+/* підпис в один рядок із трьома крапками; час не стискається й не обрізається */
+#restLabel{flex:1 1 auto; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font:var(--t-cap);}
+#restTime{flex-shrink:0; white-space:nowrap; font:var(--t-display); letter-spacing:-0.02em;}
+.rest-actions{display:flex; gap:var(--s-2); margin-top:var(--s-2);}
+.rest-actions button{
+  flex:1 1 0; min-width:0; min-height:var(--tap); padding:0 var(--s-2); border:0; border-radius:var(--r-box);
+  display:flex; align-items:center; justify-content:center; gap:var(--s-2);
+  background:var(--on-rest); color:var(--rest); font:var(--t-title); white-space:nowrap;
+  transition:background-color var(--ease);
+}
+.rest-actions button:active{background:var(--bg);}
+#restSkip{flex-grow:2;}
+.rest-bar.work .rest-actions button{background:var(--on-accent); color:var(--accent);}
+.rest-bar.work .rest-actions button:active{background:var(--bg);}
+/* залишок відпочинку — суцільна лінія 3 px (спека §5) на всю ширину вмісту смуги, під кнопками; ширину ставить JS */
+.rest-track{position:absolute; left:var(--s-4); right:var(--s-4); bottom:var(--s-1); height:3px;}
+.rest-progress{height:100%; border-radius:var(--r-pill); background:var(--on-rest); transition:width .25s linear;}
+
+/* ============ Вікна (спека §6.10) ============ */
+.sheet-overlay{position:fixed; inset:0; z-index:50; display:flex; align-items:flex-end; background:var(--scrim);}
+.sheet{
+  width:100%; max-height:88vh; overflow-y:auto; overscroll-behavior:contain;
+  padding:var(--s-2) var(--s-4) calc(var(--s-6) + var(--safe-bottom));
+  border-radius:var(--r-sheet) var(--r-sheet) 0 0; background:var(--surface-1); color:var(--text);
+  transition:transform .2s ease-out;
+}
+.sheet.dragging{transition:none;}
+.sheet-handle{width:36px; height:4px; margin:var(--s-1) auto var(--s-4); border-radius:var(--r-pill); background:var(--surface-3);}
+.sheet h2{margin:var(--s-4) 0 var(--s-1); font:var(--t-title);}
+.close-sheet{width:100%; margin-top:var(--s-6);}
+
+/* ============ Вікно повторів (спека §6.11) ============ */
+.picker-title{font:var(--t-title);}
+.picker-rest{margin-top:var(--s-1); color:var(--rest); font:var(--t-title);}
+.picker-sub{margin:var(--s-1) 0 var(--s-4); color:var(--text-2); font:var(--t-body);}
+.picker-sub .nowrap{white-space:nowrap;}
+.picker-w{display:flex; flex-direction:column; gap:var(--s-1); margin-bottom:var(--s-4);}
+.picker-w small{color:var(--text-2); font:var(--t-cap);}
+.picker-quick{width:100%; min-height:52px; margin-bottom:var(--s-3);}
+.picker-grid{display:grid; grid-template-columns:repeat(5, 1fr); gap:var(--s-2);}
+.picker-grid button{
+  min-width:0; height:48px; padding:0; border:2px solid transparent; border-radius:var(--r-box);
+  background:var(--surface-2); color:var(--text); font:var(--t-title);
+  transition:background-color var(--ease);
+}
+.picker-grid button:active{background:var(--surface-3);}
+/* є межі цілі: у межах — --text, поза — --text-2 */
+.picker-grid.ranged button:not(.ok){color:var(--text-2);}
+.picker-grid button.sug{border-color:var(--accent);}
+.picker-grid button.cur, .picker-grid.ranged button.cur{background:var(--accent); color:var(--on-accent);}
+.picker-clear{width:100%; margin-top:var(--s-3);}
+
+/* ============ Картка вправи у вікні (спека §6.7, §7) ============ */
+.sheet-tile{overflow:hidden; border-radius:var(--r-card); background:var(--tile);}
+.sheet-img{display:block; width:100%; max-height:42vh; object-fit:contain;}
+.sheet-sets{color:var(--text-2); font:var(--t-body);}
+.goal-row{display:flex; gap:var(--s-2);}
+.goal-row label{flex:1; min-width:0; display:flex; flex-direction:column; gap:var(--s-1); color:var(--text-2); font:var(--t-cap);}
+.link-btn{width:100%; margin-top:var(--s-2);}
+.cues{margin:var(--s-6) 0 var(--s-4); padding:0 0 0 var(--s-5); font:var(--t-body);}
+.cues li + li{margin-top:var(--s-2);}
+/* нотатка у вікні — вкладена, тому на --surface-2 (спека §4.1) */
+.sheet .note-card{background:var(--surface-2);}
+
+/* ============ Налаштування (спека §6.13) ============ */
+.settings-row{
+  display:flex; align-items:center; justify-content:space-between; gap:var(--s-3);
+  min-height:60px; padding:var(--s-2) 0; border-bottom:1px solid var(--line); font:var(--t-body);
+}
+.settings-group .settings-row:last-child{border-bottom:0;}
+.settings-row > span:first-child{min-width:0;}
+.settings-row .btn, .settings-row .field{flex-shrink:0;}
+#weekCycle{color:var(--text-2);}
+
+/* «Записати» на екрані «Тіло» — головна кнопка */
+.primary-btn{width:100%; margin-top:var(--s-3);}
+
+/* ============ Тост (спека §6.14) ============ */
+.toast{
+  position:fixed; left:50%; top:calc(var(--safe-top) + var(--s-3)); transform:translateX(-50%); z-index:60;
+  display:flex; align-items:center; gap:var(--s-2); width:max-content; max-width:calc(100% - var(--s-4) - var(--s-4));
+  padding:var(--s-3) var(--s-5); border-radius:var(--r-card); background:var(--surface-2); color:var(--text); font:var(--t-body);
+}
+
+/* ============ Спільне для вкладок і вікон: заголовок розділу, рядки, списки ============ */
+/* заголовок розділу — як заголовок блоку на «Сьогодні» (спека §6.6) */
+.section-title{margin:var(--s-6) 0 var(--s-2); color:var(--text-2); font:var(--t-cap);}
+.section-title:first-child{margin-top:0;}
+
+/* рядки з лінією --line, без тла (спека §6.15): історія тренувань, заміри тіла, журнал у вікні вправи */
+.hist-table{margin-top:var(--s-2);}
+.section-title + .hist-table{margin-top:0;}
+.hrow{
+  display:flex; align-items:baseline; gap:var(--s-3); padding:var(--s-3) 0;
+  border-bottom:1px solid var(--line); font:var(--t-body);
+}
+.hrow:last-child{border-bottom:0;}
+.hrow span:first-child{flex:0 0 auto; min-width:56px; color:var(--text-2);}
+.hrow span:nth-child(2){flex:1; min-width:0;}
+.hrow .reps{flex:1; min-width:0; color:var(--text); text-align:right;}
+.hrow .reps .ic{color:var(--accent); vertical-align:-4px;}
+.hrow i{font-style:normal; color:var(--text-2); font:var(--t-cap);} /* позначка deload (спека §6.14) */
+
+/* картка-список: рядки з лінією всередині картки (харчування, розклад, таблиця тижня) */
+.list-card{margin-bottom:var(--s-2); padding:0 var(--s-4); border-radius:var(--r-card); background:var(--surface-1);}
+.nutri-row, .sched-row{
+  display:flex; align-items:baseline; gap:var(--s-3); padding:var(--s-3) 0;
+  border-bottom:1px solid var(--line); font:var(--t-body);
+}
+.nutri-row:last-child, .sched-row:last-child, .trow:last-child{border-bottom:0;}
+/* харчування: назва --text-2, значення --accent-hi праворуч */
+.nutri-row{justify-content:space-between;}
+.nutri-row span:first-child{min-width:0; color:var(--text-2);}
+.nutri-row .p{flex-shrink:0; color:var(--accent-hi); text-align:right;}
+/* розклад: час — підпис, опис — основний текст */
+.sched-row .time{flex:0 0 auto; min-width:88px; color:var(--text-2);}
+.sched-row span:last-child{flex:1; min-width:0;}
+
+/* списки довідки й нотаток харчування: --t-body, виділене <b> — --text (жирність <b> за замовчуванням, як у нотатці §6.5) */
+.guide-list{margin:var(--s-3) 0 0; padding:0 0 0 var(--s-5); color:var(--text-2); font:var(--t-body);}
+.guide-list li + li{margin-top:var(--s-2);}
+.guide-list b{color:var(--text);}
+.list-card + .guide-list{margin-top:var(--s-4);}
+.disclaimer{margin-top:var(--s-4); color:var(--text-2); font:var(--t-cap);}
+
+/* порожній стан — іконка й текст --text-2; помилка завантаження — --text (спека §6.19) */
+.empty-state{
+  display:flex; flex-direction:column; align-items:center; gap:var(--s-3);
+  padding:var(--s-6) var(--s-4); color:var(--text-2); font:var(--t-body); text-align:center;
+}
+.empty-state.fatal{min-height:100%; justify-content:center; color:var(--text);}
+
+/* ============ «Прогрес» (спека §6.15, §5) ============ */
+.stat-grid{display:flex; gap:var(--s-2);}
+.stat-card{flex:1 1 0; min-width:0; padding:var(--s-4) var(--s-3); border-radius:var(--r-card); background:var(--surface-1);}
+.stat-card .v{color:var(--text); font:var(--t-num); white-space:nowrap;}
+.stat-card .l{margin-top:var(--s-0); color:var(--text-2); font:var(--t-cap);}
+/* тижні циклу: 6 сегментів, підпис deload під шостим (сітка з тими ж 6 стовпцями й проміжком, що й сегменти) */
+.cycle{margin-top:var(--s-4);}
+.cycle-cap{display:grid; grid-template-columns:repeat(6, minmax(0, 1fr)); gap:var(--s-1); margin-top:var(--s-1);}
+.cycle-cap span{grid-column:6; justify-self:end; color:var(--text-2); font:var(--t-cap); white-space:nowrap;}
+
+/* картка вправи з графіком; уся картка відкриває вікно вправи */
+.hist-card{margin-bottom:var(--s-2); padding:var(--s-4); border-radius:var(--r-card); background:var(--surface-1);}
+.hist-card.tap{cursor:pointer; transition:background-color var(--ease);}
+.hist-card.tap:active{background:var(--surface-3);}
+.hname{font:var(--t-title);}
+.hist-card canvas{display:block; width:100%; height:64px; margin-top:var(--s-3);}
+.hist-meta{
+  display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:var(--s-1) var(--s-3);
+  margin-top:var(--s-2); color:var(--text-2); font:var(--t-cap);
+}
+/* зміна з першого запису: без змін і погіршення — --text-2, покращення — --accent-hi (спека §4.1) */
+.chg{display:inline-flex; align-items:center; gap:var(--s-1); margin-left:auto; color:var(--text-2); font:var(--t-body); white-space:nowrap;}
+.chg.up{color:var(--accent-hi);}
+
+/* ============ «Тіло» (спека §6.16) ============ */
+.body-card{margin-bottom:var(--s-2); padding:var(--s-4); border-radius:var(--r-card); background:var(--surface-1);}
+.body-fields{display:flex; gap:var(--s-2);}
+.body-field{flex:1 1 0; min-width:0; display:flex; flex-direction:column; gap:var(--s-1); color:var(--text-2); font:var(--t-cap);}
+/* три поля на 320 px — по 80 px: менший бічний відступ, щоб «141.5» вміщалось цілим */
+.body-field .field{padding:var(--s-2) var(--s-1);}
+.body-note{margin-top:var(--s-3); color:var(--text-2); font:var(--t-cap);}
+
+/* ============ «Довідка» (спека §6.17) ============ */
+/* таблиця тижня: свій стовпець --text, чужий --text-2, день — підпис */
+.trow{
+  display:grid; grid-template-columns:66px minmax(0, 1fr) minmax(0, 1fr); gap:var(--s-2); align-items:baseline;
+  padding:var(--s-3) 0; border-bottom:1px solid var(--line); color:var(--text-2); font:var(--t-body);
+}
+.trow span:first-child{font:var(--t-cap);}
+.trow.th{font:var(--t-cap);}
+.trow .me{color:var(--text);}

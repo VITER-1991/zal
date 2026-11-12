@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <title>ZAL</title>
-<meta name="theme-color" content="#121418">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ZAL">
@@ -14,25 +15,47 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<svg class="sprite" width="0" height="0" aria-hidden="true">
+<symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0"/><path d="M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2"/></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z"/><path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M12 7v5l3 3"/></symbol>
+<symbol id="i-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6l-6 6"/></symbol>
+<symbol id="i-player-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16l13 -8z"/></symbol>
+<symbol id="i-player-stop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5m0 2a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5l0 14"/><path d="M5 12l14 0"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5l10 -10"/></symbol>
+<symbol id="i-trending-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6 -6l4 4l8 -8"/><path d="M14 7l7 0l0 7"/></symbol>
+<symbol id="i-trending-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l6 6l4 -4l8 8"/><path d="M21 10l0 7l-7 0"/></symbol>
+<symbol id="i-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5l0 14"/><path d="M18 11l-6 -6"/><path d="M6 11l6 -6"/></symbol>
+<symbol id="i-arrow-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5l0 14"/><path d="M18 13l-6 6"/><path d="M6 13l6 6"/></symbol>
+<symbol id="i-alert-triangle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z"/><path d="M12 16h.01"/></symbol>
+<symbol id="i-flame" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12c2 -2.96 0 -7 -1 -8c0 3.038 -1.773 4.741 -3 6c-1.226 1.26 -2 3.24 -2 5a6 6 0 1 0 12 0c0 -1.532 -1.056 -3.94 -2 -5c-1.786 3 -2.791 3 -4 2z"/></symbol>
+<symbol id="i-chart-line" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19l16 0"/><path d="M4 15l4 -6l4 2l4 -5l4 4"/></symbol>
+<symbol id="i-ruler-measure" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.875 12c.621 0 1.125 .512 1.125 1.143v5.714c0 .631 -.504 1.143 -1.125 1.143h-15.875a1 1 0 0 1 -1 -1v-5.857c0 -.631 .504 -1.143 1.125 -1.143h15.75z"/><path d="M9 12v2"/><path d="M6 12v3"/><path d="M12 12v3"/><path d="M18 12v3"/><path d="M15 12v2"/><path d="M3 3v4"/><path d="M3 5h18"/><path d="M21 3v4"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19a9 9 0 0 1 9 0a9 9 0 0 1 9 0"/><path d="M3 6a9 9 0 0 1 9 0a9 9 0 0 1 9 0"/><path d="M3 6l0 13"/><path d="M12 6l0 13"/><path d="M21 6l0 13"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6l-12 12"/><path d="M6 6l12 12"/></symbol>
+<symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2"/><path d="M7 11l5 5l5 -5"/><path d="M12 4l0 12"/></symbol>
+<symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2"/><path d="M7 9l5 -5l5 5"/><path d="M12 4l0 12"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l16 0"/><path d="M10 11l0 6"/><path d="M14 11l0 6"/><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12"/><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3"/></symbol>
+<symbol id="i-barbell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h1"/><path d="M6 8h-2a1 1 0 0 0 -1 1v6a1 1 0 0 0 1 1h2"/><path d="M6 7v10a1 1 0 0 0 1 1h1a1 1 0 0 0 1 -1v-10a1 1 0 0 0 -1 -1h-1a1 1 0 0 0 -1 1z"/><path d="M9 12h6"/><path d="M15 7v10a1 1 0 0 0 1 1h1a1 1 0 0 0 1 -1v-10a1 1 0 0 0 -1 -1h-1a1 1 0 0 0 -1 1z"/><path d="M18 8h2a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-2"/><path d="M22 12h-1"/></symbol>
+<symbol id="i-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12z"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M4 11h16"/><path d="M11 15h1"/><path d="M12 15v3"/></symbol>
+</svg>
 
 <div id="app">
 
   <!-- Onboarding: profile pick -->
   <div id="onboard" class="screen hidden">
     <div class="onboard-inner">
-      <div class="brand-mark">VEETER FITNESS</div>
-      <h1>ZAL</h1>
-      <p class="muted">Хто тренується на цьому телефоні?</p>
+      <h1 class="onboard-logo">ZAL</h1>
+      <p class="onboard-q">Хто тренується на цьому телефоні?</p>
       <div class="profile-grid">
         <button class="profile-pick" data-profile="vitalii">
-          <span class="avatar">💪</span>
-          <span>Віталій</span>
-          <span class="muted small">5 днів · руки</span>
+          <svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-user"/></svg>
+          <span>Віталій · 5 днів</span>
         </button>
         <button class="profile-pick" data-profile="tetiana">
-          <span class="avatar">🍑</span>
-          <span>Тетяна</span>
-          <span class="muted small">3 дні · сідниці</span>
+          <svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-user"/></svg>
+          <span>Тетяна · 3 дні</span>
         </button>
       </div>
     </div>
@@ -43,7 +66,7 @@
     <header class="topbar">
       <button id="profileBtn" class="profile-chip"></button>
       <div class="brand">ZAL</div>
-      <button id="settingsBtn" class="icon-btn" aria-label="Налаштування">⚙️</button>
+      <button id="settingsBtn" class="icon-btn" aria-label="Налаштування"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-settings"/></svg></button>
     </header>
 
     <div id="weekBanner" class="banner"></div>
@@ -53,10 +76,10 @@
     <main id="dayContent" class="day-content"></main>
 
     <nav class="tabbar">
-      <button class="tab-btn active" data-tab="today">Сьогодні</button>
-      <button class="tab-btn" data-tab="progress">Прогрес</button>
-      <button class="tab-btn" data-tab="body">Тіло</button>
-      <button class="tab-btn" data-tab="guide">Довідка</button>
+      <button class="tab-btn active" data-tab="today"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-flame"/></svg><span>Сьогодні</span></button>
+      <button class="tab-btn" data-tab="progress"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-chart-line"/></svg><span>Прогрес</span></button>
+      <button class="tab-btn" data-tab="body"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-ruler-measure"/></svg><span>Тіло</span></button>
+      <button class="tab-btn" data-tab="guide"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-book"/></svg><span>Довідка</span></button>
     </nav>
   </div>
 
@@ -64,14 +87,14 @@
   <div id="progressScreen" class="screen hidden">
     <header class="topbar">
       <div class="brand">Прогрес</div>
-      <div style="width:40px"></div>
+      <div class="topbar-spacer"></div>
     </header>
     <main id="progressContent" class="day-content"></main>
     <nav class="tabbar">
-      <button class="tab-btn" data-tab="today">Сьогодні</button>
-      <button class="tab-btn active" data-tab="progress">Прогрес</button>
-      <button class="tab-btn" data-tab="body">Тіло</button>
-      <button class="tab-btn" data-tab="guide">Довідка</button>
+      <button class="tab-btn" data-tab="today"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-flame"/></svg><span>Сьогодні</span></button>
+      <button class="tab-btn active" data-tab="progress"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-chart-line"/></svg><span>Прогрес</span></button>
+      <button class="tab-btn" data-tab="body"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-ruler-measure"/></svg><span>Тіло</span></button>
+      <button class="tab-btn" data-tab="guide"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-book"/></svg><span>Довідка</span></button>
     </nav>
   </div>
 
@@ -79,14 +102,14 @@
   <div id="bodyScreen" class="screen hidden">
     <header class="topbar">
       <div class="brand">Тіло</div>
-      <div style="width:40px"></div>
+      <div class="topbar-spacer"></div>
     </header>
     <main id="bodyContent" class="day-content"></main>
     <nav class="tabbar">
-      <button class="tab-btn" data-tab="today">Сьогодні</button>
-      <button class="tab-btn" data-tab="progress">Прогрес</button>
-      <button class="tab-btn active" data-tab="body">Тіло</button>
-      <button class="tab-btn" data-tab="guide">Довідка</button>
+      <button class="tab-btn" data-tab="today"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-flame"/></svg><span>Сьогодні</span></button>
+      <button class="tab-btn" data-tab="progress"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-chart-line"/></svg><span>Прогрес</span></button>
+      <button class="tab-btn active" data-tab="body"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-ruler-measure"/></svg><span>Тіло</span></button>
+      <button class="tab-btn" data-tab="guide"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-book"/></svg><span>Довідка</span></button>
     </nav>
   </div>
 
@@ -94,14 +117,14 @@
   <div id="guideScreen" class="screen hidden">
     <header class="topbar">
       <div class="brand">Довідка</div>
-      <div style="width:40px"></div>
+      <div class="topbar-spacer"></div>
     </header>
     <main id="guideContent" class="day-content"></main>
     <nav class="tabbar">
-      <button class="tab-btn" data-tab="today">Сьогодні</button>
-      <button class="tab-btn" data-tab="progress">Прогрес</button>
-      <button class="tab-btn" data-tab="body">Тіло</button>
-      <button class="tab-btn active" data-tab="guide">Довідка</button>
+      <button class="tab-btn" data-tab="today"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-flame"/></svg><span>Сьогодні</span></button>
+      <button class="tab-btn" data-tab="progress"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-chart-line"/></svg><span>Прогрес</span></button>
+      <button class="tab-btn" data-tab="body"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-ruler-measure"/></svg><span>Тіло</span></button>
+      <button class="tab-btn active" data-tab="guide"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-book"/></svg><span>Довідка</span></button>
     </nav>
   </div>
 
@@ -133,10 +156,10 @@
   <div id="restBar" class="rest-bar hidden">
     <div class="rest-info"><span id="restLabel"></span><span id="restTime"></span></div>
     <div class="rest-actions" id="restActions">
-      <button id="restMinus">−15</button><button id="restSkip">Пропустити</button><button id="restPlus">+15</button>
+      <button id="restMinus" aria-label="Мінус 15 секунд">−15</button><button id="restSkip">Пропустити</button><button id="restPlus" aria-label="Плюс 15 секунд">+15</button>
     </div>
-    <div class="rest-actions hidden" id="workActions"><button id="workStop">■ Стоп — записати підхід</button></div>
-    <div id="restProgress" class="rest-progress"></div>
+    <div class="rest-actions hidden" id="workActions"><button id="workStop"><svg class="ic" width="20" height="20" aria-hidden="true"><use href="#i-player-stop"/></svg><span>Стоп — записати підхід</span></button></div>
+    <div class="rest-track"><div id="restProgress" class="rest-progress"></div></div>
   </div>
 
   <div id="toast" class="toast hidden"></div>

@@ -2,9 +2,12 @@
 (function () {
   "use strict";
 
-  // Старий index.html (без core.js) із новим app.js — перший запуск після оновлення на слабкому інтернеті.
+  // Файли різних версій (старий index.html без core.js чи без спрайта, старий style.css без токенів) із новим app.js —
+  // перший запуск після оновлення на слабкому інтернеті. Стилі в <head> блокують цей скрипт, тож токен уже читається.
   // Один раз за сесію вкладки просимо service worker оновитись і перезавантажуємось; вдруге — лише повідомлення.
-  if (typeof ZalCore === "undefined" || !document.getElementById("workStop")) {
+  if (typeof ZalCore === "undefined" || !document.getElementById("workStop") ||
+      !document.querySelector("svg.sprite symbol") ||
+      getComputedStyle(document.documentElement).getPropertyValue("--tap").trim() === "") {
     const FLAG = "zal_mixed_reload";
     let tried = false;
     try { tried = sessionStorage.getItem(FLAG) === "1"; } catch (e) {}
@@ -16,12 +19,30 @@
         : Promise.resolve();
       Promise.race([upd, new Promise((r) => setTimeout(r, 3000))]).then(go, go);
     } else {
-      document.body.innerHTML = '<div class="empty-state"><span class="emoji">⚠️</span>Оновлення не завершилось. Закрий застосунок і відкрий ще раз при доброму інтернеті.</div>';
+      showFatal("Оновлення не завершилось. Закрий застосунок і відкрий ще раз при доброму інтернеті.");
     }
     return;
   }
   // файли узгоджені — наступне змішане завантаження в цій вкладці знову має одну спробу
   try { sessionStorage.removeItem("zal_mixed_reload"); } catch (e) {}
+
+  // Піктограма зі спрайта в index.html (спека §4.4). cls — додатковий клас, напр. "lg" (24 px).
+  // width/height — щоб розмір не залежав від CSS (старий style.css із кешу не роздує іконку до 300×150).
+  function icon(name, cls) {
+    const px = cls && /(^|\s)lg(\s|$)/.test(cls) ? 24 : 20;
+    return '<svg class="ic' + (cls ? " " + cls : "") + '" width="' + px + '" height="' + px + '" aria-hidden="true"><use href="#i-' + name + '"/></svg>';
+  }
+  // Значення CSS-змінної з :root (кольори для canvas беремо звідси, не з літералів)
+  function cssVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+  // Сторінка помилки замість застосунку; спрайт лишається, бо він поза #app. Ніколи не кидає виняток.
+  function showFatal(msg) {
+    try {
+      const host = document.getElementById("app") || document.body;
+      host.innerHTML = '<div class="empty-state fatal">' + icon("alert-triangle", "lg") + "<span>" + msg + "</span></div>";
+    } catch (e) {}
+  }
 
   const DAY_IDS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
   const UNIT_LABEL = { reps: "повт.", sec: "сек", m: "м", done: "" };
@@ -59,7 +80,7 @@
   }
   function lsSet(key, val) {
     try { localStorage.setItem(key, JSON.stringify(val)); return true; }
-    catch (e) { toast("Не вдалось зберегти — пам'ять заповнена. Зроби експорт у ⚙️"); return false; }
+    catch (e) { toast("Не вдалось зберегти — пам'ять заповнена. Зроби експорт у налаштуваннях", "warn"); return false; }
   }
   const logKey = (p) => "wa3_log_" + p;
   const sessKey = (p) => "wa3_sessions_" + p;
@@ -142,10 +163,14 @@
   const cycleNo = () => Math.ceil(weekNumber() / 6);
 
   // ---------- toast ----------
+  // kind "warn" — попередження (спека §6.14): іконка alert-triangle перед текстом
   let toastTimer = null;
-  function toast(msg) {
+  function toast(msg, kind) {
     const el = $("#toast");
-    el.textContent = msg;
+    el.innerHTML = kind === "warn" ? icon("alert-triangle") : "";
+    const txt = document.createElement("span");
+    txt.textContent = msg;
+    el.appendChild(txt);
     el.classList.remove("hidden");
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => el.classList.add("hidden"), 2000);
@@ -157,7 +182,7 @@
       .then((r) => r.json())
       .then((data) => { P = data; boot(); })
       .catch(() => {
-        document.body.innerHTML = '<div class="empty-state"><span class="emoji">⚠️</span>Не вдалось завантажити програму.</div>';
+        showFatal("Не вдалось завантажити програму.");
       });
     if ("serviceWorker" in navigator) {
       const hadController = !!navigator.serviceWorker.controller;
@@ -244,26 +269,34 @@
   }
 
   function renderProfileChip() {
-    const avatar = profile === "vitalii" ? "💪" : "🍑";
-    $("#profileBtn").innerHTML = `<span>${avatar}</span><span>${prog().name}</span>`;
+    $("#profileBtn").innerHTML = `${icon("user")}<span>${prog().name}</span>`;
   }
 
+  // Рядок тижня (спека §6.2): підпис + пігулка стану, пояснення окремим рядком
   function renderBanner() {
     const wk = weekNumber();
     const banner = $("#weekBanner");
-    let cls = "banner";
-    let text = `Тиждень ${wk} · цикл ${cycleNo()}`;
+    let state = "", note = "";
     if (isDeload()) {
-      cls += " warn";
-      text += " — <b>deload</b>: ваги мінус 40%, по 2 підходи. Застосунок уже перерахував.";
+      state = "deload";
+      note = "Ваги мінус 40%, по 2 підходи. Застосунок уже перерахував.";
     } else if (wk <= 2) {
-      text += " — <b>вхід</b>: вага, з якою 2–3 повтори в запасі. Без відмови. Запиши стартові ваги.";
+      state = "вхід";
+      note = "Вага, з якою 2–3 повтори в запасі. Без відмови. Запиши стартові ваги.";
     } else if (wk % 6 === 5) {
-      text += " — наступного тижня deload.";
+      state = "наступного тижня deload";
     }
-    if (!prog().days.find((d) => d.id === nowDayId())) text += " Сьогодні відновлення.";
-    banner.className = cls;
-    banner.innerHTML = text;
+    if (!prog().days.find((d) => d.id === nowDayId())) note += (note ? " " : "") + "Сьогодні відновлення.";
+    banner.className = "banner";
+    banner.innerHTML = `<div class="banner-row"><span class="banner-week">Тиждень ${wk} · цикл ${cycleNo()}</span>${state ? `<span class="pill tint">${state}</span>` : ""}</div>`
+      + (note ? `<div class="banner-note">${note}</div>` : "");
+  }
+
+  // Сегменти прогресу (спека §5): перші done заповнені, current — поточний
+  function segs(total, done, current) {
+    let h = '<div class="segs">';
+    for (let i = 0; i < total; i++) h += '<i class="seg' + (i < done ? " on" : "") + (i === current ? " cur" : "") + '"></i>';
+    return h + "</div>";
   }
 
   function renderDayTabs() {
@@ -273,7 +306,7 @@
     prog().days.forEach((d) => {
       const btn = document.createElement("button");
       btn.className = "day-tab" + (d.id === selectedDay ? " active" : "");
-      btn.innerHTML = d.label + (d.id === today ? '<span class="dot"></span>' : "");
+      btn.innerHTML = `<span>${d.label}</span>` + (d.id === today ? '<span class="dot"></span>' : "");
       btn.onclick = () => { selectedDay = d.id; renderDayTabs(); renderDay(); };
       wrap.appendChild(btn);
     });
@@ -361,13 +394,14 @@
     const head = document.createElement("div");
     head.className = "day-head";
     const mode = day.together
-      ? `<span class="chip together">разом з ${prog().partner} · 6:00–7:00</span>`
-      : `<span class="chip">сам${day.superset ? " · суперсети" : ""}</span>`;
+      ? `<span class="pill">разом з ${prog().partner} · 6:00–7:00</span>`
+      : `<span class="pill">сам${day.superset ? " · суперсети" : ""}</span>`;
     head.innerHTML = `
       <div class="day-title">${day.title}</div>
       <div class="day-focus">${day.focus}</div>
-      <div class="day-meta">${mode}<span class="chip" id="dayProgress">${doneCount}/${exs.length} вправ</span></div>
-      ${selectedDay !== nowDayId() ? `<div class="day-hint">Записи підуть на сьогоднішню дату (${fmtDate(date)}).</div>` : ""}
+      <div class="day-meta">${mode}</div>
+      <div class="day-progress">${segs(exs.length, doneCount)}<span id="dayProgress">${doneCount} з ${exs.length} вправ</span></div>
+      ${selectedDay !== nowDayId() ? `<div class="day-hint">${icon("calendar")}<span>Записи підуть на сьогоднішню дату (${fmtDate(date)}).</span></div>` : ""}
     `;
     content.appendChild(head);
 
@@ -404,6 +438,7 @@
       content.appendChild(w);
     }
     refreshSessionUI();
+    refreshPrimaryStart();
   }
 
   function updateDayProgress() {
@@ -411,7 +446,9 @@
     const exs = dayExercises(day);
     const n = exs.filter((ex) => isExDone(ex, getEntry(ex.id, todayISO()))).length;
     const el = $("#dayProgress");
-    if (el) el.textContent = `${n}/${exs.length} вправ`;
+    if (el) el.textContent = `${n} з ${exs.length} вправ`;
+    const sg = $(".day-progress .segs");
+    if (sg) sg.outerHTML = segs(exs.length, n);
     if (n === exs.length && dayDoneCount < exs.length) finishSession(true);
     dayDoneCount = n;
   }
@@ -441,6 +478,35 @@
     if (!old || !loc) return;
     blurInside(old);
     old.replaceWith(renderExerciseCard(loc.ex, todayISO(), loc.day, loc.partner));
+    refreshPrimaryStart();
+  }
+
+  // Головна «Старт» (спека §6.7, §6.12) — на першій за порядком дня невиконаній вправі, що має «Старт», і лише поки секундомір не йде.
+  // Активна картка (клас active, фіолетові рамки) — та, де головний «Старт», або картка, на якій іде секундомір.
+  // Тільки перемикає класи: без фокусу, прокрутки й перемальовування.
+  function refreshPrimaryStart() {
+    const cards = $all("#dayContent .ex-card");
+    let target = null, activeCard = null;
+    if (cards.length && profile && P && P[profile]) {
+      if (timers.work != null) {
+        activeCard = cards.find((c) => c.dataset.ex === timers.work.exId) || null;
+      } else {
+        const day = prog().days.find((d) => d.id === selectedDay);
+        if (day) {
+          const date = todayISO();
+          const log = getLog(); // один розбір журналу на виклик: renderTimers кличе це на кожному тику
+          const entry = (id) => (log[id] || []).find((e) => e.date === date) || null;
+          for (const x of dayExercises(day)) {
+            if (isExDone(x, entry(x.id))) continue;
+            const card = cards.find((c) => c.dataset.ex === x.id);
+            const b = card ? $(".start-set", card) : null;
+            if (b) { target = b; activeCard = card; break; }
+          }
+        }
+      }
+    }
+    $all("#dayContent .start-set").forEach((b) => b.classList.toggle("primary", b === target));
+    cards.forEach((c) => c.classList.toggle("active", c === activeCard));
   }
 
   // поле у фокусі, яке зараз зникне: зберегти вже вписану вагу й зняти фокус (iOS не знімає фокус при дотику до кнопки,
@@ -480,7 +546,8 @@
     card.className = "ex-card";
     card.dataset.ex = ex.id;
     const entry = getEntry(ex.id, date);
-    if (isExDone(ex, entry)) card.classList.add("done");
+    const exDone = isExDone(ex, entry);
+    if (exDone) card.classList.add("done");
     const n = planSets(ex);
     const ni = nextIdx(ex, entry);
     const ci = ni >= 0 ? ni : chipCount(ex, entry) - 1;
@@ -493,14 +560,14 @@
     const head = document.createElement("div");
     head.className = "ex-head";
     head.innerHTML = `
-      <img class="ex-thumb" src="${ex.img}" alt="" loading="lazy">
+      <div class="ex-tile"><img class="ex-thumb" src="${ex.img}" alt="" loading="lazy"></div>
       <div class="ex-meta">
         <div class="ex-name"><span class="ex-code">${ex.code}</span>${ex.name}</div>
         <div class="ex-sets">${setsLabel}${ex.note ? ` <span class="ex-note">· ${ex.note}</span>` : ""}</div>
         ${noLoadLast}
-        ${ex.prio && !isDeload() ? `<div class="ex-tag">останній підхід — до відмови</div>` : ""}
+        ${ex.prio && !isDeload() ? `<span class="pill tint ex-tag">останній підхід — до відмови</span>` : ""}
       </div>
-      <span class="ex-more">›</span>
+      <span class="ex-more">${exDone ? icon("check") : icon("chevron-right")}</span>
     `;
     head.onclick = () => openExerciseSheet(ex);
     card.appendChild(head);
@@ -512,13 +579,15 @@
       const sug = weightHint(ex, ci);
       const unitShort = ex.load === "assist" ? "lb доп." : "lb";
       const p = Z.prevSet(last, ci);
-      const prevTxt = p ? (p.w != null ? `${fmtW(p.w)} ${unitShort} × ${p.r}` : `× ${p.r}`) : "—";
+      // число окремо від одиниці й повторів: на вузькому екрані «lb × 10» переноситься, а не обрізається
+      const prevNum = p && p.w != null ? fmtW(p.w) : "—";
+      const prevRest = p ? (p.w != null ? `${unitShort} × ${p.r}` : `× ${p.r}`) : "";
       const wRow = document.createElement("div");
       wRow.className = "w-row";
       wRow.innerHTML = `
-        <div class="w-prev"><small>минулого разу</small><b>${prevTxt}</b></div>
+        <div class="w-prev"><small>минулого разу</small><span class="w-val"><b>${prevNum}</b>${prevRest ? `<i>${prevRest}</i>` : ""}</span></div>
         <label class="w-now"><small>зараз</small>
-          <span><input class="w-input" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" placeholder="—" value="${fmtW(sug.value)}"><i>${unitShort}</i></span>
+          <span class="w-val"><input class="w-input" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" placeholder="—" value="${fmtW(sug.value)}"><i>${unitShort}</i></span>
         </label>
       `;
       body.appendChild(wRow);
@@ -533,7 +602,7 @@
         const v = raw === "" ? null : parseNum(raw);
         if (raw !== "" && (v == null || v < 0 || v > 2000)) {
           input.value = shown;
-          toast(WEIGHT_ERR);
+          toast(WEIGHT_ERR, "warn");
           return;
         }
         upsert(ex.id, date, { draft: v });
@@ -547,7 +616,10 @@
       input.addEventListener("zal-flush", flush);
       const hint = document.createElement("div");
       hint.className = "last-weight" + (sug.up ? " up" : "");
-      hint.textContent = sug.text;
+      const hintTxt = document.createElement("span");
+      hintTxt.textContent = sug.text;
+      if (sug.up) hint.innerHTML = icon("trending-up");
+      hint.appendChild(hintTxt);
       if (sug.text) body.appendChild(hint);
     }
 
@@ -561,8 +633,8 @@
       const running = timers.work && timers.work.exId === ex.id;
       if (running || ni >= 0) {
         const sb = document.createElement("button");
-        sb.className = "start-set" + (running ? " stop" : "");
-        sb.textContent = running ? workStopText() : `▶ Старт підходу ${ni + 1}`;
+        sb.className = "btn start-set" + (running ? " stop" : "");
+        sb.innerHTML = running ? workStopHtml() : `${icon("player-play")}<span>Старт підходу ${ni + 1}</span>`;
         sb.onclick = () => (running ? stopWork() : startWork(ex, ni, date));
         body.appendChild(sb);
       }
@@ -579,7 +651,7 @@
       const done = !!(entry && entry.sets[0]);
       const b = document.createElement("button");
       b.className = "set-chip wide" + (done ? " done" : "");
-      b.textContent = done ? "✓ Виконано" : "Позначити виконаним";
+      b.innerHTML = `${icon("check")}<span>${done ? "Виконано" : "Позначити виконаним"}</span>`;
       b.onclick = () => {
         if (staleDay(date)) return;
         setSet(ex.id, date, 0, done ? null : { w: null, r: 1, t: null });
@@ -591,10 +663,11 @@
       return;
     }
     const n = chipCount(ex, entry);
+    const cur = nextIdx(ex, entry); // підхід «зараз» — рамка
     for (let i = 0; i < n; i++) {
       const s = entry && entry.sets[i] ? entry.sets[i] : null;
       const b = document.createElement("button");
-      b.className = "set-chip" + (s ? " done" : "");
+      b.className = "set-chip" + (s ? " done" : i === cur ? " cur" : "");
       b.innerHTML = s
         ? `<b>${s.r}</b><small>${s.w != null ? fmtW(s.w) + " lb" : UNIT_LABEL[ex.unit]}</small>`
         : `<span class="n">${i + 1}</span><small>${targetTxt(ex)}</small>`;
@@ -612,7 +685,7 @@
       const add = document.createElement("button");
       add.className = "set-chip add";
       add.setAttribute("aria-label", "Додати підхід");
-      add.textContent = "＋";
+      add.innerHTML = icon("plus", "lg");
       add.onclick = () => {
         if (staleDay(date)) return;
         const e = getEntry(ex.id, date);
@@ -730,19 +803,19 @@
     values.sort((a, b) => a - b);
     const unitWord = { reps: "повторів", sec: "секунд", m: "метрів" }[ex.unit];
     const quick = current == null && suggested != null
-      ? `<button class="picker-quick" data-v="${suggested}">✓ ${suggested} ${UNIT_LABEL[ex.unit]}${ex.lo != null && !fromTime ? " — як у цілі" : ""}</button>`
+      ? `<button class="btn primary picker-quick" data-v="${suggested}">${icon("check")}<span>${suggested} ${UNIT_LABEL[ex.unit]}${ex.lo != null && !fromTime ? " — як у цілі" : ""}</span></button>`
       : "";
     $("#pickerContent").innerHTML = `
       <div class="picker-title">Підхід ${i + 1} · скільки ${unitWord} зробив?</div>
       <div class="picker-rest hidden" id="pickerRest"></div>
-      <div class="picker-sub">${ex.name} · ціль ${targetTxt(ex)}</div>
-      ${editSet && ex.load !== "none" ? `<label class="picker-w"><small>Вага, ${ex.load === "assist" ? "lb допомоги" : "lb"}</small><input id="pickW" class="w-input" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" placeholder="—" value="${fmtW(editSet.w)}"></label>` : ""}
+      <div class="picker-sub">${ex.name} · <span class="nowrap">ціль ${targetTxt(ex)}</span></div>
+      ${editSet && ex.load !== "none" ? `<label class="picker-w"><small>Вага, ${ex.load === "assist" ? "lb допомоги" : "lb"}</small><input id="pickW" class="w-input field num" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" placeholder="—" value="${fmtW(editSet.w)}"></label>` : ""}
       ${quick}
-      <div class="picker-grid">${values.map((v) => {
+      <div class="picker-grid${ex.lo != null ? " ranged" : ""}">${values.map((v) => {
         const inRange = ex.lo != null && v >= ex.lo && v <= ex.hi;
         return `<button data-v="${v}" class="${v === current ? "cur" : ""}${v === suggested && current == null ? " sug" : ""}${inRange ? " ok" : ""}">${v}</button>`;
       }).join("")}</div>
-      ${current != null ? `<button class="picker-clear">Скасувати підхід</button>` : ""}
+      ${current != null ? `<button class="btn quiet picker-clear">${icon("x")}<span>Скасувати підхід</span></button>` : ""}
     `;
     overlay.classList.remove("hidden");
     renderTimers();
@@ -757,7 +830,7 @@
             const raw = wi.value.trim();
             const v = raw === "" ? null : parseNum(raw);
             if (raw === "" || (v != null && v >= 0 && v <= 2000)) w = v;
-            else toast(WEIGHT_ERR);
+            else toast(WEIGHT_ERR, "warn");
           }
         }
         closeOverlay("pickerOverlay");
@@ -812,7 +885,8 @@
   }
 
   const workElapsed = () => Math.floor((Date.now() - timers.work.startAt) / 1000);
-  const workStopText = () => `■ Стоп · ${Z.fmtClock(workElapsed())}`;
+  // час — окремий елемент: тик оновлює лише його, піктограма не перестворюється
+  const workStopHtml = () => `${icon("player-stop")}<span>Стоп · <span class="work-time">${Z.fmtClock(workElapsed())}</span></span>`;
   const restRemaining = () => Math.max(0, Math.ceil((timers.rest.endAt - Date.now()) / 1000));
 
   function startWork(ex, i, date) {
@@ -873,7 +947,7 @@
       const loc = locate(w.exId);
       $("#restLabel").textContent = `Підхід ${w.i + 1} · ${loc ? loc.ex.name : ""}`;
       $("#restTime").textContent = Z.fmtClock(workElapsed());
-      $all(".start-set.stop").forEach((b) => { b.textContent = workStopText(); });
+      $all(".start-set.stop .work-time").forEach((t) => { t.textContent = Z.fmtClock(workElapsed()); });
     } else if (r) {
       $("#restLabel").textContent = r.label;
       $("#restTime").textContent = Z.fmtClock(left);
@@ -888,6 +962,7 @@
     const wantTick = timerBusy() || clockWanted();
     if (wantTick && !tickId) tickId = setInterval(tickTimers, 250);
     if (!wantTick && tickId) { clearInterval(tickId); tickId = null; }
+    refreshPrimaryStart();
   }
   function finishRest(natural) {
     if (!timers.rest) return;
@@ -974,7 +1049,7 @@
     const all = getSessions();
     const s = all[todayISO()];
     if (!s || s.end != null) {
-      if (auto) toast("Тренування завершено! Шейк і сніданок 🥤");
+      if (auto) toast("Тренування завершено! Шейк і сніданок");
       return;
     }
     // секундомір підходу зупиняємо без запису, відпочинок — без сигналу
@@ -998,33 +1073,34 @@
     refreshSessionUI();
     renderTimers();
     const dur = fmtMin(Z.sessionMs(s));
-    toast(auto ? `Тренування завершено: ${dur}. Шейк і сніданок 🥤` : `Тренування: ${dur}`);
+    toast(auto ? `Тренування завершено: ${dur}. Шейк і сніданок` : `Тренування: ${dur}`);
   }
 
   // чип з годинником, картка завершеного тренування й кнопка «Завершити» — залежно від сесії за сьогодні
   function refreshSessionUI() {
-    ["sessClock", "sessCard", "sessFinish"].forEach((id) => { const e = $("#" + id); if (e) e.remove(); });
+    ["sessClockWrap", "sessCard", "sessFinish"].forEach((id) => { const e = $("#" + id); if (e) e.remove(); });
     const content = $("#dayContent");
     const meta = $(".day-meta", content);
     if (!meta) return;
     const s = todaySession();
     if (s && s.end == null) {
       const chip = document.createElement("span");
-      chip.className = "chip clock";
-      chip.id = "sessClock";
-      chip.dataset.start = String(s.start);
+      chip.className = "pill clock";
+      chip.id = "sessClockWrap";
+      chip.innerHTML = `${icon("clock")}<span id="sessClock"></span>`;
+      $("#sessClock", chip).dataset.start = String(s.start);
       meta.appendChild(chip);
       const btn = document.createElement("button");
-      btn.className = "primary-btn";
+      btn.className = "btn";
       btn.id = "sessFinish";
       btn.textContent = "Завершити тренування";
       btn.onclick = () => finishSession(false);
       content.appendChild(btn);
     } else if (s) {
       const card = document.createElement("div");
-      card.className = "note-card sess-card";
+      card.className = "sess-card";
       card.id = "sessCard";
-      card.textContent = `Тренування: ${fmtHM(s.start)}–${fmtHM(s.end)} · ${fmtMin(Z.sessionMs(s))}`;
+      card.innerHTML = `${icon("check")}<span>Тренування: ${fmtHM(s.start)}–${fmtHM(s.end)} · ${fmtMin(Z.sessionMs(s))}</span>`;
       meta.parentNode.after(card);
     }
     updateSessClock();
@@ -1034,7 +1110,7 @@
   function updateSessClock() {
     const el = $("#sessClock");
     if (!el) return;
-    el.textContent = "⏱ " + Z.fmtClock((Date.now() - Number(el.dataset.start)) / 1000);
+    el.textContent = Z.fmtClock((Date.now() - Number(el.dataset.start)) / 1000);
   }
 
   // Повернулись у застосунок: оновити таймер, а якщо настав новий день — перемалювати.
@@ -1065,20 +1141,20 @@
     const goalHtml = ex.unit === "done" ? "" : `
       <div class="section-title">Ціль</div>
       <div class="goal-row">
-        <label>Підходи<input id="goalN" type="text" inputmode="numeric" enterkeyhint="done"></label>
-        ${ex.lo == null ? "" : `<label>від (${goalUnit})<input id="goalLo" type="text" inputmode="numeric" enterkeyhint="done"></label>
-        <label>до (${goalUnit})<input id="goalHi" type="text" inputmode="numeric" enterkeyhint="done"></label>`}
+        <label>Підходи<input id="goalN" class="field num" type="text" inputmode="numeric" enterkeyhint="done"></label>
+        ${ex.lo == null ? "" : `<label>від (${goalUnit})<input id="goalLo" class="field num" type="text" inputmode="numeric" enterkeyhint="done"></label>
+        <label>до (${goalUnit})<input id="goalHi" class="field num" type="text" inputmode="numeric" enterkeyhint="done"></label>`}
       </div>
-      <button id="goalReset" class="link-btn hidden"></button>`;
+      <button id="goalReset" class="btn quiet link-btn hidden"></button>`;
     const h = history(ex.id).slice(-8).reverse();
     const unit = ex.load === "assist" ? "lb доп." : "lb";
     const hist = h.length
       ? `<div class="section-title">Журнал</div><div class="hist-table">${h.map((e) => `
           <div class="hrow"><span>${fmtDate(e.date)}${e.deload ? " <i>deload</i>" : ""}</span>
-          <span class="reps">${ex.unit === "done" ? "✓" : histSets(e, unit)}</span></div>`).join("")}</div>`
+          <span class="reps">${ex.unit === "done" ? icon("check") : histSets(e, unit)}</span></div>`).join("")}</div>`
       : "";
     $("#sheetContent").innerHTML = `
-      <img src="${ex.img}" alt="">
+      <div class="sheet-tile"><img class="sheet-img" src="${ex.img}" alt=""></div>
       <h2><span class="ex-code">${ex.code}</span>${ex.name}</h2>
       <div class="sheet-sets">${ex.sets}${ex.note ? ` · <span>${ex.note}</span>` : ""}</div>
       ${goalHtml}
@@ -1086,7 +1162,7 @@
       ${ex.prio ? `<div class="note-card">Останній підхід — до відмови або за 1 повтор до неї.</div>` : ""}
       ${ex.base ? `<div class="note-card">Базова вправа — ніколи до відмови. Крок прогресії +${ex.step} lb.</div>` : ""}
       ${hist}
-      <button class="close-sheet" id="closeSheetBtn">Закрити</button>
+      <button class="btn close-sheet" id="closeSheetBtn">Закрити</button>
     `;
     $("#sheetOverlay").classList.remove("hidden");
     $("#sheet").scrollTop = 0;
@@ -1149,15 +1225,19 @@
     const meta = getMeta();
     $("#settingsContent").innerHTML = `
       <div class="section-title">Профіль</div>
-      <div class="settings-row"><span>${prog().name}</span><button id="switchProfileBtn">Змінити</button></div>
-      <div class="settings-row"><span>Старт програми (понеділок)</span><input id="startDateInput" type="date" value="${esc(meta.startDate)}"></div>
-      <div class="settings-row"><span>Тиждень · цикл</span><span id="weekCycle">${weekNumber()} · ${cycleNo()}</span></div>
+      <div class="settings-group">
+        <div class="settings-row"><span>${prog().name}</span><button class="btn" id="switchProfileBtn">${icon("user")}<span>Змінити</span></button></div>
+        <div class="settings-row"><span>Старт програми (понеділок)</span><input id="startDateInput" class="field" type="date" value="${esc(meta.startDate)}"></div>
+        <div class="settings-row"><span>Тиждень · цикл</span><span id="weekCycle">${weekNumber()} · ${cycleNo()}</span></div>
+      </div>
       <div class="section-title">Резервна копія</div>
-      <div class="settings-row"><span>Зберегти журнал у файл</span><button id="exportBtn">Експорт</button></div>
-      <div class="settings-row"><span>Відновити з файлу</span><button id="importBtn">Імпорт</button></div>
+      <div class="settings-group">
+        <div class="settings-row"><span>Зберегти журнал у файл</span><button class="btn" id="exportBtn">${icon("download")}<span>Експорт</span></button></div>
+        <div class="settings-row"><span>Відновити з файлу</span><button class="btn" id="importBtn">${icon("upload")}<span>Імпорт</span></button></div>
+        <div class="settings-row"><span>Очистити журнал профілю</span><button class="btn danger" id="clearBtn">${icon("alert-triangle")}<span>Очистити</span></button></div>
+      </div>
       <input type="file" id="importFile" accept="application/json,.json" class="hidden">
-      <div class="settings-row"><span>Очистити журнал профілю</span><button class="danger" id="clearBtn">Очистити</button></div>
-      <button class="close-sheet" id="closeSettingsBtn">Закрити</button>
+      <button class="btn close-sheet" id="closeSettingsBtn">Закрити</button>
     `;
     overlay.classList.remove("hidden");
     $("#switchProfileBtn").onclick = () => {
@@ -1201,7 +1281,7 @@
       if (!f) return;
       f.text().then((t) => {
         let d;
-        try { d = JSON.parse(t); } catch (err) { toast("Файл не схожий на копію журналу"); return; }
+        try { d = JSON.parse(t); } catch (err) { toast("Файл не схожий на копію журналу", "warn"); return; }
         const ok = d && d.app === "veeter";
         let log = null, sessions = null, plan = null;
         if (ok && d.v === 3) {
@@ -1215,7 +1295,7 @@
           plan = {};
         }
         const body = log && sessions && plan ? cleanBody(d.body) : null;
-        if (!log || !sessions || !plan || !body) { toast("Файл не схожий на копію журналу"); return; }
+        if (!log || !sessions || !plan || !body) { toast("Файл не схожий на копію журналу", "warn"); return; }
         if (d.profile !== profile && !confirm(`Це копія профілю «${(P[d.profile] || {}).name || d.profile}». Завантажити в «${prog().name}»?`)) return;
         if (!confirm("Замінити поточний журнал даними з файлу?")) return;
         saveLog(log);
@@ -1282,6 +1362,8 @@
     Object.values(log).forEach((arr) => Array.isArray(arr) && arr.forEach((e) => { if (e && Z.doneSets(e).length) dates.add(e.date); }));
     const weekStart = mondayOf(new Date());
     const thisWeek = [...dates].filter((d) => d >= weekStart).length;
+    // позиція в 6-тижневому циклі (0…5): минулі тижні заповнені, поточний — --accent-hi, шостий — deload
+    const cyclePos = (weekNumber() - 1) % 6;
 
     content.innerHTML = `
       <div class="stat-grid">
@@ -1289,6 +1371,7 @@
         <div class="stat-card"><div class="v">${thisWeek}/${prog().days.length}</div><div class="l">цього тижня</div></div>
         <div class="stat-card"><div class="v">${weekNumber()}</div><div class="l">тиждень · цикл ${cycleNo()}</div></div>
       </div>
+      <div class="cycle">${segs(6, cyclePos, cyclePos)}<div class="cycle-cap"><span>deload</span></div></div>
     `;
     let any = false;
     prog().days.forEach((day) => {
@@ -1302,7 +1385,7 @@
       exs.forEach((ex) => content.appendChild(progressCard(ex)));
     });
     if (!any) {
-      content.innerHTML += '<div class="empty-state"><span class="emoji">📈</span>Відміть перші підходи на вкладці «Сьогодні» — графіки з\'являться тут.</div>';
+      content.innerHTML += '<div class="empty-state">' + icon("chart-line", "lg") + '<span>Відміть перші підходи на вкладці «Сьогодні» — графіки з\'являться тут.</span></div>';
     }
     renderSessionHistory(content);
   }
@@ -1343,13 +1426,16 @@
     const better = ex.load === "assist" ? delta < 0 : delta > 0;
     const lastE = h[h.length - 1];
     const card = document.createElement("div");
-    card.className = "hist-card";
+    card.className = "hist-card tap";
+    // зміна (спека §4.1): покращення — --accent-hi і trending-up, погіршення — trending-down, без змін — без іконки
+    const chg = delta ? (better ? "chg up" : "chg") : "chg";
+    const chgIcon = delta ? icon(better ? "trending-up" : "trending-down") : "";
     card.innerHTML = `
       <div class="hname"><span class="ex-code">${ex.code}</span>${ex.name}</div>
       <canvas></canvas>
       <div class="hist-meta">
         <span>${fmtDate(h[0].date)} → ${fmtDate(lastE.date)} · ${Z.doneSets(lastE).map((s) => s.r).join("/")}</span>
-        <span class="${delta ? (better ? "good" : "bad") : ""}">${last} ${unit}${delta ? ` (${delta > 0 ? "+" : ""}${delta})` : ""}</span>
+        <span class="${chg}">${chgIcon}<span>${last} ${unit}${delta ? ` (${delta > 0 ? "+" : ""}${delta})` : ""}</span></span>
       </div>
     `;
     card.onclick = () => openExerciseSheet(ex);
@@ -1370,12 +1456,13 @@
     const stepX = values.length > 1 ? (w - pad * 2) / (values.length - 1) : 0;
     const xy = (v, i) => [values.length > 1 ? pad + stepX * i : w / 2, h - pad - ((v - min) / range) * (h - pad * 2)];
     ctx.beginPath();
-    ctx.strokeStyle = "#4fd1a5";
+    const accent = cssVar("--accent");
+    ctx.strokeStyle = accent;
     ctx.lineWidth = 2.5 * dpr;
     ctx.lineJoin = "round";
     values.forEach((v, i) => { const [x, y] = xy(v, i); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
     ctx.stroke();
-    ctx.fillStyle = "#ff6b35";
+    ctx.fillStyle = accent;
     values.forEach((v, i) => { const [x, y] = xy(v, i); ctx.beginPath(); ctx.arc(x, y, 3 * dpr, 0, Math.PI * 2); ctx.fill(); });
   }
 
@@ -1386,7 +1473,7 @@
     const arr = getBody().slice().sort((a, b) => (a.date < b.date ? -1 : 1));
     const last = arr.length ? arr[arr.length - 1] : null;
     const isFri = nowDayId() === "fri";
-    const field = (id, ph, label) => `<label class="body-field"><span>${label}</span><input id="${id}" type="text" inputmode="decimal" autocomplete="off" placeholder="${esc(ph)}"></label>`;
+    const field = (id, ph, label) => `<label class="body-field"><span>${label}</span><input id="${id}" class="field num" type="text" inputmode="decimal" autocomplete="off" placeholder="${esc(ph)}"></label>`;
 
     content.innerHTML = `
       <div class="section-title">Заміри · ${isFri ? "сьогодні п'ятниця — зважся до залу" : "раз на тиждень, у п'ятницю до залу"}</div>
@@ -1395,14 +1482,14 @@
           ${field("bwInput", last && last.weight != null ? last.weight : "lb", "Вага, lb")}
           ${pr.measurements ? field("waistInput", last && last.waist != null ? last.waist : "см", "Талія, см") + field("hipsInput", last && last.hips != null ? last.hips : "см", "Стегна, см") : ""}
         </div>
-        ${pr.measurements ? `<div class="muted small" style="margin-top:8px">Талію й стегна — раз на 2 тижні (парні тижні).</div>` : ""}
-        <button id="bodySaveBtn" class="primary-btn">Записати</button>
+        ${pr.measurements ? `<div class="body-note">Талію й стегна — раз на 2 тижні (парні тижні).</div>` : ""}
+        <button id="bodySaveBtn" class="btn primary primary-btn">Записати</button>
       </div>
       <div class="hist-card" id="bodyChart"></div>
       <div id="bodyList"></div>
       <div class="section-title">Білок і відновлення</div>
       <div class="note-card">${pr.nutrition.intro}</div>
-      <div class="hist-card">${pr.nutrition.rows.map((r) => `<div class="nutri-row"><span>${r[0]}</span><span class="p">${r[1]}</span></div>`).join("")}</div>
+      <div class="list-card">${pr.nutrition.rows.map((r) => `<div class="nutri-row"><span>${r[0]}</span><span class="p">${r[1]}</span></div>`).join("")}</div>
       <ul class="guide-list">${pr.nutrition.notes.map((n) => `<li>${n}</li>`).join("")}</ul>
       <div class="disclaimer">${pr.nutrition.disclaimer}</div>
     `;
@@ -1411,10 +1498,10 @@
     const ws = arr.filter((e) => e.weight != null);
     if (ws.length > 1) {
       const d = ws[ws.length - 1].weight - ws[0].weight;
-      chart.innerHTML = `<div class="hname">Вага тіла</div><canvas></canvas><div class="hist-meta"><span>${fmtDate(ws[0].date)} → ${fmtDate(ws[ws.length - 1].date)}</span><span>${ws[ws.length - 1].weight} lb (${d > 0 ? "+" : ""}${Math.round(d * 10) / 10})</span></div>`;
+      chart.innerHTML = `<div class="hname">Вага тіла</div><canvas></canvas><div class="hist-meta"><span>${fmtDate(ws[0].date)} → ${fmtDate(ws[ws.length - 1].date)}</span><span class="chg">${d ? icon(d > 0 ? "arrow-up" : "arrow-down") : ""}<span>${ws[ws.length - 1].weight} lb (${d > 0 ? "+" : ""}${Math.round(d * 10) / 10})</span></span></div>`;
       requestAnimationFrame(() => drawSparkline($("canvas", chart), ws.map((e) => e.weight)));
     } else {
-      chart.innerHTML = `<div class="muted small">Після двох зважувань тут з'явиться графік.</div>`;
+      chart.innerHTML = `<div class="empty-state">${icon("chart-line", "lg")}<span>Після двох зважувань тут з'явиться графік.</span></div>`;
     }
     if (arr.length) {
       $("#bodyList").innerHTML = `<div class="hist-table">${arr.slice(-12).reverse().map((e) => `
@@ -1444,12 +1531,12 @@
     const me = profile === "vitalii" ? 1 : 2;
     content(`#guideContent`, `
       <div class="section-title">Тиждень</div>
-      <div class="hist-card table">
-        <div class="trow th"><span>День</span><span>Віталій</span><span>Тетяна</span></div>
+      <div class="list-card">
+        <div class="trow th"><span>День</span><span class="${me === 1 ? "me" : ""}">Віталій</span><span class="${me === 2 ? "me" : ""}">Тетяна</span></div>
         ${j.week.map((r) => `<div class="trow"><span>${r[0]}</span><span class="${me === 1 ? "me" : ""}">${r[1]}</span><span class="${me === 2 ? "me" : ""}">${r[2]}</span></div>`).join("")}
       </div>
       <div class="section-title">Спільне тренування · пн, ср, пт</div>
-      <div class="hist-card sched">${j.schedule.map((r) => `<div class="nutri-row"><span class="p left">${r[0]}</span><span>${r[1]}</span></div>`).join("")}</div>
+      <div class="list-card">${j.schedule.map((r) => `<div class="sched-row"><span class="time">${r[0]}</span><span>${r[1]}</span></div>`).join("")}</div>
       <ul class="guide-list">${j.rules.map((b) => `<li>${b}</li>`).join("")}</ul>
       <div class="section-title">Як прогресувати</div>
       <ul class="guide-list">${pr.progression.map((b) => `<li>${b}</li>`).join("")}</ul>
@@ -1462,7 +1549,7 @@
         <li>Тисни на заповнений квадратик — виправ кількість повторів або скасуй підхід.</li>
         <li>Коли всі підходи на верхній межі, з тижня 3 застосунок сам підставить нову вагу за правилом вище (у гравітроні — менше допомоги).</li>
         <li>Кожен 6-й тиждень — deload: 2 підходи і вага −40% підставляються автоматично.</li>
-        <li>Дані зберігаються на телефоні. Раз на місяць роби експорт у ⚙️.</li>
+        <li>Дані зберігаються на телефоні. Раз на місяць роби експорт у налаштуваннях.</li>
       </ul>
     `);
   }
