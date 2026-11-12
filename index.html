@@ -131,21 +131,18 @@
 
   <!-- Rest timer bar -->
   <div id="restBar" class="rest-bar hidden">
-    <div class="rest-info">
-      <span id="restLabel">Відпочинок</span>
-      <span id="restTime">60</span>
+    <div class="rest-info"><span id="restLabel"></span><span id="restTime"></span></div>
+    <div class="rest-actions" id="restActions">
+      <button id="restMinus">−15</button><button id="restSkip">Пропустити</button><button id="restPlus">+15</button>
     </div>
-    <div class="rest-actions">
-      <button id="restMinus">−15</button>
-      <button id="restSkip">Пропустити</button>
-      <button id="restPlus">+15</button>
-    </div>
+    <div class="rest-actions hidden" id="workActions"><button id="workStop">■ Стоп — записати підхід</button></div>
     <div id="restProgress" class="rest-progress"></div>
   </div>
 
   <div id="toast" class="toast hidden"></div>
 </div>
 
+<script src="core.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -2,6 +2,27 @@
 (function () {
   "use strict";
 
+  // Старий index.html (без core.js) із новим app.js — перший запуск після оновлення на слабкому інтернеті.
+  // Один раз за сесію вкладки просимо service worker оновитись і перезавантажуємось; вдруге — лише повідомлення.
+  if (typeof ZalCore === "undefined" || !document.getElementById("workStop")) {
+    const FLAG = "zal_mixed_reload";
+    let tried = false;
+    try { tried = sessionStorage.getItem(FLAG) === "1"; } catch (e) {}
+    if (!tried) {
+      try { sessionStorage.setItem(FLAG, "1"); } catch (e) {}
+      const go = () => location.reload();
+      const upd = "serviceWorker" in navigator && navigator.serviceWorker.getRegistration
+        ? navigator.serviceWorker.getRegistration().then((r) => r && r.update()).catch(() => {})
+        : Promise.resolve();
+      Promise.race([upd, new Promise((r) => setTimeout(r, 3000))]).then(go, go);
+    } else {
+      document.body.innerHTML = '<div class="empty-state"><span class="emoji">⚠️</span>Оновлення не завершилось. Закрий застосунок і відкрий ще раз при доброму інтернеті.</div>';
+    }
+    return;
+  }
+  // файли узгоджені — наступне змішане завантаження в цій вкладці знову має одну спробу
+  try { sessionStorage.removeItem("zal_mixed_reload"); } catch (e) {}
+
   const DAY_IDS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
   const UNIT_LABEL = { reps: "повт.", sec: "сек", m: "м", done: "" };
 
@@ -9,10 +30,13 @@
   let profile = localStorage.getItem("wa2_profile");
   let selectedDay = null;
   let currentTab = "today";
-  let rest = { running: false, endAt: 0, total: 0, intervalId: null };
+  // секундомір підходу, відпочинок і час зупиненого, ще не записаного підходу (епоха, мс)
+  let timers = { work: null, rest: null, pending: null };
+  let tickId = null;         // один інтервал на обидва таймери; живе, лише поки щось іде
   let renderedDate = null;   // дата, з якою намальовано екран «Сьогодні»
   let dayDoneCount = 0;      // скільки вправ було виконано, щоб тост «завершено» не повторювався
-  let pendingReload = false; // нова версія застосунку чекає кінця відпочинку
+  let pendingReload = false; // нова версія застосунку чекає, поки застосунок сховають
+  let touched = false;       // користувач уже щось натискав після запуску
   let audioCtx = null;
 
   const $ = (sel, root) => (root || document).querySelector(sel);
@@ -21,14 +45,13 @@
   const todayISO = () => iso(new Date());
   const nowDayId = () => DAY_IDS[new Date().getDay()];
   const fmtDate = (s) => { const [, m, d] = s.split("-"); return `${d}.${m}`; };
-  const round5 = (v) => Math.round(v / 5) * 5;
   const fmtW = (v) => (v == null || v === "" ? "" : String(Math.round(Number(v) * 10) / 10));
   const parseNum = (s) => { const v = parseFloat(String(s == null ? "" : s).replace(",", ".")); return isNaN(v) ? null : v; };
   const isISO = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(new Date(s + "T00:00:00"));
   const isNumOrNull = (v) => v == null || (typeof v === "number" && isFinite(v));
   // номер дня без годинника — щоб перехід на літній/зимовий час не з'їдав годину
   const dayNum = (s) => { const [y, m, d] = s.split("-").map(Number); return Math.round(Date.UTC(y, m - 1, d) / 86400000); };
-  const hasReps = (e) => Array.isArray(e.reps) && e.reps.some((r) => r != null);
+  const Z = ZalCore;
 
   // ---------- storage ----------
   function lsGet(key, fallback) {
@@ -38,11 +61,23 @@
     try { localStorage.setItem(key, JSON.stringify(val)); return true; }
     catch (e) { toast("Не вдалось зберегти — пам'ять заповнена. Зроби експорт у ⚙️"); return false; }
   }
-  const logKey = (p) => "wa2_log_" + p;
+  const logKey = (p) => "wa3_log_" + p;
+  const sessKey = (p) => "wa3_sessions_" + p;
+  const planKey = (p) => "wa3_plan_" + p;
+  const timerKey = (p) => "wa3_timer_" + p;
   const bodyKey = (p) => "wa2_body_" + p;
   const metaKey = (p) => "wa2_meta_" + p;
   const getLog = () => lsGet(logKey(profile), {});
   const saveLog = (log) => lsSet(logKey(profile), log);
+  const getPlan = () => Z.cleanPlan(lsGet(planKey(profile), {})) || {};
+  const savePlan = (p) => lsSet(planKey(profile), p);
+  const getSessions = () => lsGet(sessKey(profile), {});
+  const saveSessions = (s) => lsSet(sessKey(profile), s);
+  // Журнал v3 береться зі старого wa2 лише раз; wa2_log_* тільки читаємо й ніколи не пишемо.
+  function ensureMigrated(p) {
+    if (localStorage.getItem(logKey(p)) !== null) return;
+    lsSet(logKey(p), Z.migrateLogV2(lsGet("wa2_log_" + p, {})));
+  }
   const getBody = () => lsGet(bodyKey(profile), []);
   const saveBody = (arr) => lsSet(bodyKey(profile), arr);
   function getMeta() {
@@ -70,7 +105,7 @@
     return (getLog()[exId] || []).find((e) => e.date === date) || null;
   }
   function history(exId) {
-    return (getLog()[exId] || []).filter(hasReps)
+    return (getLog()[exId] || []).filter((e) => Z.doneSets(e).length > 0)
       .sort((a, b) => (a.date < b.date ? -1 : 1));
   }
   function lastBefore(exId, date, skipDeload) {
@@ -81,11 +116,23 @@
     const log = getLog();
     if (!log[exId]) log[exId] = [];
     let e = log[exId].find((x) => x.date === date);
-    if (!e) { e = { date, weight: null, reps: [], deload: isDeload() }; log[exId].push(e); }
+    if (!e) { e = { date, deload: isDeload(), sets: [] }; log[exId].push(e); }
     Object.assign(e, patch);
     saveLog(log);
     return e;
   }
+  function setSet(exId, date, i, set) {
+    const log = getLog();
+    if (!log[exId]) log[exId] = [];
+    let e = log[exId].find((x) => x.date === date);
+    if (!e) { e = { date, deload: isDeload(), sets: [] }; log[exId].push(e); }
+    while (e.sets.length < i) e.sets.push(null);
+    e.sets[i] = set;
+    while (e.sets.length && e.sets[e.sets.length - 1] == null) e.sets.pop();
+    saveLog(log);
+    return e;
+  }
+  const ctx = () => ({ week: weekNumber(), deload: isDeload() });
 
   // ---------- week / cycle ----------
   function weekNumber() {
@@ -115,11 +162,11 @@
     if ("serviceWorker" in navigator) {
       const hadController = !!navigator.serviceWorker.controller;
       navigator.serviceWorker.register("sw.js").catch(() => {});
-      // нова версія активувалась — перезавантажуємось, але не посеред відпочинку
+      // нова версія активувалась — перезавантажуємось лише тоді, коли це нікому не заважає
       navigator.serviceWorker.addEventListener("controllerchange", () => {
         if (!hadController) return;
-        if (rest.running) pendingReload = true;
-        else location.reload();
+        pendingReload = true;
+        maybeReload();
       });
     }
   }
@@ -133,18 +180,46 @@
   function showOnboard() {
     $all(".screen").forEach((s) => s.classList.add("hidden"));
     $("#onboard").classList.remove("hidden");
+    renderTimers();
   }
 
   function selectProfile(p) {
     profile = p;
     localStorage.setItem("wa2_profile", p);
     if (!lsGet(metaKey(p), null)) saveMeta({ startDate: defaultStart() });
+    invalidateProg();
+    ensureMigrated(p);
     showMain();
   }
 
-  const prog = () => P[profile];
+  // програма профілю з накладеною ціллю (кількість підходів / межі повторів)
+  let progCache = null;
+  function invalidateProg() { progCache = null; }
+  function prog() {
+    if (progCache && progCache.p === profile) return progCache.v;
+    const base = P[profile];
+    const plan = getPlan();
+    const v = Object.assign({}, base, {
+      days: base.days.map((d) => Object.assign({}, d, {
+        blocks: d.blocks.map((b) => Object.assign({}, b, { exercises: b.exercises.map((ex) => Z.applyPlan(ex, plan[ex.id])) }))
+      }))
+    });
+    progCache = { p: profile, v };
+    return v;
+  }
+
+  // вправа з програми профілю без накладеної цілі (P не змінюємо)
+  function rawEx(exId) {
+    const base = P[profile];
+    for (const d of base.days) for (const b of d.blocks) {
+      const ex = b.exercises.find((x) => x.id === exId);
+      if (ex) return ex;
+    }
+    return null;
+  }
 
   function showMain() {
+    ensureMigrated(profile);
     $all(".screen").forEach((s) => s.classList.add("hidden"));
     $("#main").classList.remove("hidden");
     currentTab = "today";
@@ -153,12 +228,16 @@
     renderProfileChip();
     const today = nowDayId();
     const days = prog().days;
-    if (days.find((d) => d.id === today)) selectedDay = today;
+    // тренування вже йде (напр. програма п'ятниці в суботу) — повертаємось на його день
+    const open = todaySession();
+    if (open && open.end == null && days.find((d) => d.id === open.day)) selectedDay = open.day;
+    else if (days.find((d) => d.id === today)) selectedDay = today;
     else {
       const idx = DAY_IDS.indexOf(today);
       const next = days.find((d) => DAY_IDS.indexOf(d.id) > idx) || days[0];
       selectedDay = next.id;
     }
+    restoreTimers();
     renderBanner();
     renderDayTabs();
     renderDay();
@@ -203,52 +282,48 @@
   // ---------- exercise logic ----------
   const planSets = (ex) => (ex.unit === "done" ? 1 : isDeload() ? Math.min(2, ex.n) : ex.n);
 
-  // вправи «до відмови» з допомогою: коли всі підходи по 12+ — менше допомоги
-  const FAILURE_ASSIST_TOP = 12;
-  function allTop(entry, ex) {
-    if (!entry) return false;
-    if (ex.hi == null) {
-      if (ex.load !== "assist") return false;
-      const r = entry.reps.slice(0, ex.n);
-      return r.length >= ex.n && r.every((v) => v != null && v >= FAILURE_ASSIST_TOP);
-    }
-    const r = entry.reps.slice(0, ex.n);
-    return r.length >= ex.n && r.every((v) => v != null && v >= ex.hi);
+  // скільки квадратиків малювати: ціль + додані, але зроблені підходи не ховаємо, навіть якщо ціль зменшили
+  function chipCount(ex, entry) {
+    let lastDone = -1;
+    if (entry) entry.sets.forEach((x, i) => { if (x) lastDone = i; });
+    return Math.max(planSets(ex) + ((entry && entry.extra) || 0), lastDone + 1);
   }
 
-  function suggestion(ex) {
+  // перший незроблений підхід серед квадратиків; -1, якщо всі зроблено
+  function nextIdx(ex, entry) {
+    const n = chipCount(ex, entry);
+    for (let i = 0; i < n; i++) if (!(entry && entry.sets[i])) return i;
+    return -1;
+  }
+
+  function weightHint(ex, i) {
     const date = todayISO();
-    if (ex.load === "none") return { value: "", hint: "" };
-    const unit = ex.load === "assist" ? "lb допомоги" : "lb";
-    if (isDeload()) {
-      const base = lastBefore(ex.id, date, true);
-      if (!base || base.weight == null) return { value: "", hint: "deload: легка вага, по 2 підходи" };
-      const v = ex.load === "assist" ? Math.max(ex.step, round5(base.weight * 1.4)) : round5(base.weight * 0.6);
-      return { value: v, hint: `deload: ${ex.load === "assist" ? "+40% допомоги" : "−40%"} від ${base.weight} ${unit}` };
-    }
+    if (ex.load === "none") return { value: null, up: false, text: "" };
     const last = lastBefore(ex.id, date, true);
-    if (!last || last.weight == null) return { value: "", hint: "", first: true };
-    const repsTxt = last.reps.filter((r) => r != null).join("/");
-    const lastTxt = `минулого разу ${last.weight} ${unit}${repsTxt ? " × " + repsTxt : ""}`;
-    if (ex.load === "assist" && last.weight <= 0 && allTop(last, ex)) {
-      return { value: 0, hint: `${lastTxt} — допомога вже 0, переходь на вправу без гравітрона`, up: true };
+    const r = Z.nextWeight(ex, i, getEntry(ex.id, date), last, ctx());
+    const unit = ex.load === "assist" ? "lb допомоги" : "lb";
+    const base = Z.prevSet(last, i);
+    const tw = last ? Z.topWeight(last, ex.load) : null;
+    const repsTxt = last ? Z.doneSets(last).map((s) => s.r).join("/") : "";
+    const lastTxt = tw != null ? `минулого разу ${fmtW(tw)} ${unit}${repsTxt ? " × " + repsTxt : ""}` : "";
+    // «до відмови» не має верхньої межі — кажемо, який поріг узяли
+    const fail = ex.hi == null ? `усі підходи по ${Z.FAILURE_ASSIST_TOP}+` : "";
+    let text = "";
+    if (r.why === "up") text = `${lastTxt} — ${fail || "усі на верхній межі"}, ${ex.load === "assist" ? `−${ex.step} lb допомоги` : `+${ex.step} lb`}`;
+    else if (r.why === "top") text = `${lastTxt} — ${fail || "верхня межа"}, ${ex.load === "assist" ? "можна зменшити допомогу" : "можна додати"}`;
+    else if (r.why === "deload") {
+      // легка вага не зменшується (округлення дало б 0 або ту саму вагу) — «−40%» було б неправдою
+      text = ex.load !== "assist" && r.value === base.w ? "deload: легка вага, по 2 підходи"
+        : `deload: ${ex.load === "assist" ? "+40% допомоги" : "−40%"} від ${fmtW(base.w)} ${unit}`;
     }
-    if (allTop(last, ex) && weekNumber() >= 3) {
-      const v = ex.load === "assist" ? Math.max(0, last.weight - ex.step) : last.weight + ex.step;
-      const d = ex.load === "assist" ? `−${ex.step} lb допомоги` : `+${ex.step} lb`;
-      return { value: v, hint: `${lastTxt} — усі на верхній межі, ${d}`, up: true };
-    }
-    if (allTop(last, ex)) return { value: last.weight, hint: `${lastTxt} — верхня межа, можна додати`, up: true };
-    if (ex.hi == null && ex.unit === "reps") return { value: last.weight, hint: `${lastTxt} — спробуй хоч на 1 повтор більше` };
-    return { value: last.weight, hint: lastTxt };
+    else if (r.why === "assist0") text = `${lastTxt} — ${fail ? fail + ", " : ""}допомога вже 0, переходь на вправу без гравітрона`;
+    else if (r.why === "first") text = "перше тренування — підбери й запиши стартову вагу";
+    else if (r.why === "same") text = lastTxt;
+    return { value: r.value, up: r.up, text };
   }
 
   function defaultValue(ex, i) {
-    if (ex.unit === "m") return ex.hi;
-    const last = lastBefore(ex.id, todayISO(), true);
-    if (last && last.reps[i] != null && ex.hi != null && last.reps[i] < ex.hi) return last.reps[i];
-    if (ex.hi != null) return ex.hi;
-    return last && last.reps[i] != null ? last.reps[i] : null;
+    return Z.defaultReps(ex, i, lastBefore(ex.id, todayISO(), true));
   }
 
   function targetTxt(ex) {
@@ -266,12 +341,16 @@
 
   function isExDone(ex, entry) {
     if (!entry) return false;
-    return entry.reps.slice(0, planSets(ex)).filter((r) => r != null).length >= planSets(ex);
+    const n = planSets(ex);
+    if (entry.sets.length < n) return false;
+    for (let i = 0; i < n; i++) if (!entry.sets[i]) return false;
+    return true;
   }
 
   function renderDay() {
     const day = prog().days.find((d) => d.id === selectedDay);
     const content = $("#dayContent");
+    blurInside(content);
     content.innerHTML = "";
     if (!day) return;
     const date = todayISO();
@@ -313,8 +392,7 @@
       const group = document.createElement("div");
       group.className = "block-group" + (day.superset ? " superset" : "");
       b.exercises.forEach((ex, j) => {
-        const next = day.superset ? (j === 0 ? b.exercises[1] : b.exercises[0]) : null;
-        group.appendChild(renderExerciseCard(ex, date, day, next));
+        group.appendChild(renderExerciseCard(ex, date, day, partnerOf(day, b, j)));
       });
       content.appendChild(group);
     });
@@ -325,6 +403,7 @@
       w.innerHTML = `<span>Розтяжка на килимках</span><span class="time">6:50–7:00</span>`;
       content.appendChild(w);
     }
+    refreshSessionUI();
   }
 
   function updateDayProgress() {
@@ -333,18 +412,83 @@
     const n = exs.filter((ex) => isExDone(ex, getEntry(ex.id, todayISO()))).length;
     const el = $("#dayProgress");
     if (el) el.textContent = `${n}/${exs.length} вправ`;
-    if (n === exs.length && dayDoneCount < exs.length) toast("Тренування завершено! Шейк і сніданок 🥤");
+    if (n === exs.length && dayDoneCount < exs.length) finishSession(true);
     dayDoneCount = n;
+  }
+
+  // у суперсеті напарник — сусідня вправа блоку
+  function partnerOf(day, b, j) {
+    return day.superset ? (j === 0 ? b.exercises[1] : b.exercises[0]) : null;
+  }
+
+  // де вправа в програмі: спершу показаний день (картки є лише для нього), потім решта — таймер глобальний
+  function locate(exId) {
+    const days = prog().days;
+    const order = days.filter((d) => d.id === selectedDay).concat(days.filter((d) => d.id !== selectedDay));
+    for (const day of order) {
+      for (const b of day.blocks) {
+        const j = b.exercises.findIndex((x) => x.id === exId);
+        if (j >= 0) return { day, ex: b.exercises[j], partner: partnerOf(day, b, j) };
+      }
+    }
+    return null;
+  }
+
+  // перемалювати одну картку на місці (разом із зв'язком із напарником по суперсету)
+  function rerenderCard(exId) {
+    const old = $(`.ex-card[data-ex="${exId}"]`);
+    const loc = locate(exId);
+    if (!old || !loc) return;
+    blurInside(old);
+    old.replaceWith(renderExerciseCard(loc.ex, todayISO(), loc.day, loc.partner));
+  }
+
+  // поле у фокусі, яке зараз зникне: зберегти вже вписану вагу й зняти фокус (iOS не знімає фокус при дотику до кнопки,
+  // а прибраний з екрана елемент не отримує ні blur, ні change)
+  // Не повторно: збереження може перемалювати день (staleDay → showMain → renderDay → blurInside).
+  let flushing = false;
+  function blurInside(el) {
+    const a = document.activeElement;
+    if (flushing || !a || a === document.body || !el.contains(a)) return;
+    flushing = true;
+    try {
+      if (a.blur) a.blur(); // спершу знімаємо фокус: вкладений виклик уже не знайде це поле
+      a.dispatchEvent(new Event("zal-flush"));
+    } finally { flushing = false; }
+  }
+
+  // зупинений «Стоп», ще не записаний підхід — лише сьогоднішній; вчорашній викидаємо
+  const isTodayAt = (at) => typeof at === "number" && isFinite(at) && iso(new Date(at)) === todayISO();
+  function currentPending() {
+    if (timers.pending && !isTodayAt(timers.pending.at)) { timers.pending = null; saveTimers(); }
+    return timers.pending;
+  }
+  // час під навантаженням підходу, зупиненого «Стоп», але ще не записаного
+  function pendingTimeFor(exId, i) {
+    const p = currentPending();
+    return p && p.exId === exId && p.i === i ? p.t : null;
+  }
+
+  const WEIGHT_ERR = "Вага: число від 0 до 2000";
+  // iOS ігнорує select() у обробнику focus — виділяємо вже після нього
+  function selectAllSoon(input) {
+    setTimeout(() => { try { input.setSelectionRange(0, input.value.length); } catch (e) {} }, 0);
   }
 
   function renderExerciseCard(ex, date, day, next) {
     const card = document.createElement("div");
     card.className = "ex-card";
+    card.dataset.ex = ex.id;
     const entry = getEntry(ex.id, date);
     if (isExDone(ex, entry)) card.classList.add("done");
-    const sug = suggestion(ex);
     const n = planSets(ex);
+    const ni = nextIdx(ex, entry);
+    const ci = ni >= 0 ? ni : chipCount(ex, entry) - 1;
+    const last = lastBefore(ex.id, date, true);
     const setsLabel = isDeload() && ex.unit !== "done" ? `${n}×${targetTxt(ex)} · deload` : ex.sets;
+    const lastDone = last ? Z.doneSets(last) : [];
+    const noLoadLast = ex.load === "none" && ex.unit !== "done" && lastDone.length
+      ? `<div class="ex-last">минулого разу ${lastDone.map((s) => s.r).join(" / ")}</div>` : "";
 
     const head = document.createElement("div");
     head.className = "ex-head";
@@ -353,6 +497,7 @@
       <div class="ex-meta">
         <div class="ex-name"><span class="ex-code">${ex.code}</span>${ex.name}</div>
         <div class="ex-sets">${setsLabel}${ex.note ? ` <span class="ex-note">· ${ex.note}</span>` : ""}</div>
+        ${noLoadLast}
         ${ex.prio && !isDeload() ? `<div class="ex-tag">останній підхід — до відмови</div>` : ""}
       </div>
       <span class="ex-more">›</span>
@@ -364,159 +509,214 @@
     body.className = "ex-body";
 
     if (ex.load !== "none") {
+      const sug = weightHint(ex, ci);
+      const unitShort = ex.load === "assist" ? "lb доп." : "lb";
+      const p = Z.prevSet(last, ci);
+      const prevTxt = p ? (p.w != null ? `${fmtW(p.w)} ${unitShort} × ${p.r}` : `× ${p.r}`) : "—";
       const wRow = document.createElement("div");
-      wRow.className = "ex-row";
-      const weightVal = entry && entry.weight != null ? entry.weight : sug.value;
+      wRow.className = "w-row";
       wRow.innerHTML = `
-        <div class="weight-box">
-          <button class="w-dec" aria-label="менше">−</button>
-          <input class="w-input" type="text" readonly inputmode="none" value="${fmtW(weightVal)}" placeholder="—">
-          <button class="w-inc" aria-label="більше">+</button>
-        </div>
-        <span class="weight-unit">${ex.load === "assist" ? "lb допомоги" : "lb"}</span>
-        <button class="w-edit">точно ›</button>
+        <div class="w-prev"><small>минулого разу</small><b>${prevTxt}</b></div>
+        <label class="w-now"><small>зараз</small>
+          <span><input class="w-input" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" placeholder="—" value="${fmtW(sug.value)}"><i>${unitShort}</i></span>
+        </label>
       `;
       body.appendChild(wRow);
       const input = $(".w-input", wRow);
-      // Вагу записуємо одразу. Запис без підходів не заважає прогресії: history() бере лише дні з підходами.
+      let shown = input.value;
+      input.addEventListener("focus", () => selectAllSoon(input));
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") input.blur(); });
+      // Вагу записуємо як чернетку. Запис без підходів не заважає прогресії: history() бере лише дні з підходами.
       const commit = () => {
         if (staleDay(date)) return;
-        upsert(ex.id, date, { weight: parseNum(input.value) });
+        const raw = input.value.trim();
+        const v = raw === "" ? null : parseNum(raw);
+        if (raw !== "" && (v == null || v < 0 || v > 2000)) {
+          input.value = shown;
+          toast(WEIGHT_ERR);
+          return;
+        }
+        upsert(ex.id, date, { draft: v });
+        input.value = shown = fmtW(v);
       };
-      const setW = (v) => { input.value = fmtW(v == null ? null : Math.max(0, Math.round(v * 10) / 10)); commit(); };
-      $(".w-dec", wRow).onclick = () => setW((parseNum(input.value) || 0) - ex.step);
-      $(".w-inc", wRow).onclick = () => setW((parseNum(input.value) || 0) + ex.step);
-      const openW = () => openWeightSheet(ex, parseNum(input.value), setW);
-      input.onclick = openW;
-      $(".w-edit", wRow).onclick = openW;
-      card._weightInput = input;
+      input.addEventListener("change", commit);
+      // запасний шлях: значення змінилось, а change не прийшов (поле прибирають з екрана у фокусі)
+      // лише для картки сьогоднішньої дати: вчорашня картка нічого не зберігає й не перемальовує екран
+      const flush = () => { if (date === todayISO() && input.value !== shown) commit(); };
+      input.addEventListener("blur", flush);
+      input.addEventListener("zal-flush", flush);
       const hint = document.createElement("div");
       hint.className = "last-weight" + (sug.up ? " up" : "");
-      hint.textContent = sug.hint || (sug.first ? "перше тренування — підбери й запиши стартову вагу" : "");
-      body.appendChild(hint);
+      hint.textContent = sug.text;
+      if (sug.text) body.appendChild(hint);
     }
 
     const track = document.createElement("div");
     track.className = "sets-track";
-    renderSetChips(track, ex, date, card, next);
+    renderSetChips(track, ex, date);
     body.appendChild(track);
+
+    // «Старт» необов'язковий: без нього квадратик записує підхід без часу
+    if (ex.unit !== "done") {
+      const running = timers.work && timers.work.exId === ex.id;
+      if (running || ni >= 0) {
+        const sb = document.createElement("button");
+        sb.className = "start-set" + (running ? " stop" : "");
+        sb.textContent = running ? workStopText() : `▶ Старт підходу ${ni + 1}`;
+        sb.onclick = () => (running ? stopWork() : startWork(ex, ni, date));
+        body.appendChild(sb);
+      }
+    }
 
     card.appendChild(body);
     return card;
   }
 
-  function renderSetChips(track, ex, date, card, next) {
+  function renderSetChips(track, ex, date) {
     const entry = getEntry(ex.id, date);
-    const n = planSets(ex);
     track.innerHTML = "";
     if (ex.unit === "done") {
-      const done = entry && entry.reps[0] != null;
+      const done = !!(entry && entry.sets[0]);
       const b = document.createElement("button");
       b.className = "set-chip wide" + (done ? " done" : "");
       b.textContent = done ? "✓ Виконано" : "Позначити виконаним";
       b.onclick = () => {
         if (staleDay(date)) return;
-        upsert(ex.id, date, { reps: done ? [] : [1] });
-        renderSetChips(track, ex, date, card, next);
-        card.classList.toggle("done", !done);
+        setSet(ex.id, date, 0, done ? null : { w: null, r: 1, t: null });
+        if (!done) { const l = locate(ex.id); ensureSession(); touchSession(l ? l.day.id : selectedDay); }
+        rerenderCard(ex.id);
         updateDayProgress();
       };
       track.appendChild(b);
       return;
     }
+    const n = chipCount(ex, entry);
     for (let i = 0; i < n; i++) {
-      const v = entry ? entry.reps[i] : null;
+      const s = entry && entry.sets[i] ? entry.sets[i] : null;
       const b = document.createElement("button");
-      b.className = "set-chip" + (v != null ? " done" : "");
-      b.innerHTML = v != null
-        ? `<b>${v}</b><small>${UNIT_LABEL[ex.unit]}</small>`
+      b.className = "set-chip" + (s ? " done" : "");
+      b.innerHTML = s
+        ? `<b>${s.r}</b><small>${s.w != null ? fmtW(s.w) + " lb" : UNIT_LABEL[ex.unit]}</small>`
         : `<span class="n">${i + 1}</span><small>${targetTxt(ex)}</small>`;
       // Підхід записуємо, коли його вже зроблено: питаємо, скільки вийшло (ціль підсвічена — один дотик).
       b.onclick = () => {
-        if (v != null) { openPicker(ex, i, v, null, (val) => setRep(ex, date, i, val, track, card, next, false)); return; }
-        openPicker(ex, i, null, defaultValue(ex, i), (val) => setRep(ex, date, i, val, track, card, next, true));
+        if (s) {
+          openPicker(ex, i, s.r, null, (val, w) => recordSet(ex, date, i, val, null, { isNew: false, restStarted: false, w }), s);
+          return;
+        }
+        openPicker(ex, i, null, suggestedValue(ex, i), (val) => recordSet(ex, date, i, val, pendingTimeFor(ex.id, i), { isNew: true, restStarted: false }));
       };
       track.appendChild(b);
+    }
+    if (((entry && entry.extra) || 0) < 10) {
+      const add = document.createElement("button");
+      add.className = "set-chip add";
+      add.setAttribute("aria-label", "Додати підхід");
+      add.textContent = "＋";
+      add.onclick = () => {
+        if (staleDay(date)) return;
+        const e = getEntry(ex.id, date);
+        const extra = (e && e.extra) || 0;
+        if (extra >= 10) return;
+        upsert(ex.id, date, { extra: extra + 1 });
+        rerenderCard(ex.id);
+      };
+      track.appendChild(add);
     }
   }
 
   // екран намальовано вчора (iOS відновив застосунок з пам'яті) — не пишемо на стару дату
   function staleDay(date) {
     if (date === todayISO()) return false;
+    resetTimers();
     showMain();
     toast("Новий день — оновив екран, тисни ще раз");
     return true;
   }
 
-  function setRep(ex, date, i, val, track, card, next, isNew) {
+  // Єдине місце, де підхід потрапляє в журнал. r === null — скасувати підхід.
+  // Новий підхід бере вагу з поля «зараз»; правка зробленого — з opts.w (поле в picker) і зберігає старий t.
+  function recordSet(ex, date, i, r, t, opts) {
     if (staleDay(date)) return;
-    const entry = getEntry(ex.id, date) || { reps: [] };
-    const reps = entry.reps.slice();
-    while (reps.length < i) reps.push(null);
-    reps[i] = val;
-    while (reps.length && reps[reps.length - 1] == null) reps.pop();
-    const patch = { reps };
-    if (card._weightInput) {
-      const w = parseNum(card._weightInput.value);
-      if (w != null) patch.weight = w;
+    const loc = locate(ex.id);
+    const next = loc ? loc.partner : null;
+    // підхід, зупинений «Стоп»: відпочинок уже запустив stopWork, навіть якщо вікно закрили й записали з квадратика
+    const fromPending = opts.isNew && r != null && pendingTimeFor(ex.id, i) != null;
+    if (r == null) setSet(ex.id, date, i, null);
+    else if (opts.isNew) {
+      // вага з поля «зараз»; картки на екрані немає (інший день, перезапуск) — та сама підказка: чернетка → перенос → пропозиція
+      const inp = ex.load !== "none" ? $(`.ex-card[data-ex="${ex.id}"] .w-input`) : null;
+      const raw = inp ? parseNum(inp.value) : ex.load !== "none" ? weightHint(ex, i).value : null;
+      const w = raw != null && raw >= 0 && raw <= 2000 ? raw : null;
+      setSet(ex.id, date, i, { w, r, t });
+      upsert(ex.id, date, { draft: undefined });
+    } else {
+      const old = getEntry(ex.id, date);
+      const prev = old ? old.sets[i] : null;
+      setSet(ex.id, date, i, { w: opts.w !== undefined ? opts.w : (prev ? prev.w : null), r, t: prev ? prev.t : null });
     }
-    upsert(ex.id, date, patch);
-    renderSetChips(track, ex, date, card, next);
-    const done = isExDone(ex, getEntry(ex.id, date));
-    card.classList.toggle("done", done);
-    if (isNew && val != null) {
+    if (opts.isNew && r != null) {
+      if (pendingTimeFor(ex.id, i) != null) timers.pending = null;
+      // підхід записано, поки на ньому йде секундомір — секундомір уже нічого не міряє
+      if (timers.work && timers.work.exId === ex.id && timers.work.i === i) timers.work = null;
+      saveTimers();
+      ensureSession();
+      touchSession(loc ? loc.day.id : selectedDay);
+    }
+    rerenderCard(ex.id);
+    if (opts.isNew && r != null) {
       if (navigator.vibrate) navigator.vibrate(20);
-      const lastSet = i === planSets(ex) - 1;
-      const nextDone = next && isExDone(next, getEntry(next.id, date));
-      if (next && !(lastSet && nextDone)) startRest(ex.restSec, `Далі ${next.code} · ${next.name}`);
-      else if (!lastSet) { if (ex.restSec) startRest(ex.restSec, `Відпочинок · ${ex.name}`); }
-      else {
-        // останній підхід вправи — відпочинок перед наступною невиконаною вправою дня
-        const up = nextUndone(ex, next, date);
-        if (up) startRest(ex.restSec || 90, `Далі ${up.code} · ${up.name}`);
+      // відпочинок звідси — лише для підходу без «Старт» і не посеред іншого підходу
+      if (!opts.restStarted && !fromPending && !timers.work) {
+        const plan = restPlan(ex, i, next, date);
+        if (plan) startRest(plan.sec, plan.label);
       }
-      if (ex.unit === "reps" && ex.hi != null && val < ex.lo) toast("Менше за нижню межу — наступного разу зменш вагу");
+      renderTimers();
+      if (ex.unit === "reps" && ex.hi != null && r < ex.lo) {
+        toast(ex.load === "assist" ? "Менше за нижню межу — наступного разу додай допомоги"
+          : ex.load === "none" ? "Менше за нижню межу цілі"
+          : "Менше за нижню межу — наступного разу зменш вагу");
+      }
     }
     updateDayProgress();
   }
 
+  // відпочинок після підходу i, рахуючи, ніби його вже записано; null — відпочинку немає
+  function restPlan(ex, i, next, date) {
+    const lastSet = i === chipCount(ex, getEntry(ex.id, date)) - 1;
+    const nextDone = next && isExDone(next, getEntry(next.id, date));
+    if (next && !(lastSet && nextDone)) return { sec: ex.restSec, label: `Далі ${next.code} · ${next.name}` };
+    if (!lastSet) return ex.restSec ? { sec: ex.restSec, label: `Відпочинок · ${ex.name}` } : null;
+    // останній підхід вправи — відпочинок перед наступною невиконаною вправою дня
+    const up = nextUndone(ex, next, date);
+    return up ? { sec: ex.restSec || 90, label: `Далі ${up.code} · ${up.name}` } : null;
+  }
+
   function nextUndone(ex, partner, date) {
-    const day = prog().days.find((d) => d.id === selectedDay);
-    if (!day) return null;
-    const list = dayExercises(day);
+    const loc = locate(ex.id);
+    if (!loc) return null;
+    const list = dayExercises(loc.day);
     const from = list.findIndex((x) => x.id === ex.id);
     const order = list.slice(from + 1).concat(list.slice(0, from));
     return order.find((x) => x.id !== ex.id && (!partner || x.id !== partner.id) && !isExDone(x, getEntry(x.id, date))) || null;
   }
 
-  // ---------- weight sheet ----------
-  function openWeightSheet(ex, current, onSet) {
-    const overlay = $("#pickerOverlay");
-    const unit = ex.load === "assist" ? "lb допомоги" : "lb";
-    const steps = [-10, -5, -1, -0.5, 0.5, 1, 5, 10];
-    $("#pickerContent").innerHTML = `
-      <div class="picker-title">Вага</div>
-      <div class="picker-sub">${ex.name}</div>
-      <div class="ws-val"><input id="wsInput" type="text" inputmode="decimal" autocomplete="off" value="${fmtW(current)}" placeholder="0"><span>${unit}</span></div>
-      <div class="ws-grid">${steps.map((s) => `<button data-s="${s}" class="${s < 0 ? "minus" : "plus"}">${s > 0 ? "+" : "−"}${String(Math.abs(s)).replace(".", ",")}</button>`).join("")}</div>
-      <button class="primary-btn" id="wsDone">Готово</button>
-    `;
-    overlay.classList.remove("hidden");
-    const inp = $("#wsInput");
-    $all(".ws-grid button", overlay).forEach((b) => {
-      b.onclick = () => {
-        const v = Math.max(0, Math.round(((parseNum(inp.value) || 0) + parseFloat(b.dataset.s)) * 10) / 10);
-        inp.value = fmtW(v);
-        onSet(v);
-      };
-    });
-    inp.onchange = () => onSet(parseNum(inp.value));
-    $("#wsDone").onclick = () => { onSet(parseNum(inp.value)); overlay.classList.add("hidden"); };
+  // ---------- reps picker ----------
+  // для вправ на час підказуємо виміряний секундоміром час (до 5 с), інакше — ціль / минулий раз
+  function suggestedValue(ex, i) {
+    const t = ex.unit === "sec" ? pendingTimeFor(ex.id, i) : null;
+    return t != null ? Math.max(5, Z.round5(t)) : defaultValue(ex, i);
   }
 
-  // ---------- reps picker ----------
-  function openPicker(ex, i, current, suggested, onPick) {
+  // другий дотик подвійного тапу не має влучити в щойно відкрите вікно
+  let pickerOpenedAt = 0;
+  const pickerFresh = () => Date.now() - pickerOpenedAt < 400;
+
+  // editSet — зроблений підхід, який правимо: зверху поле «Вага», onPick(r, w) отримує нову вагу
+  function openPicker(ex, i, current, suggested, onPick, editSet) {
     const overlay = $("#pickerOverlay");
+    pickerOpenedAt = Date.now();
+    const fromTime = ex.unit === "sec" && current == null && pendingTimeFor(ex.id, i) != null;
     let values = [];
     if (ex.unit === "sec") for (let s = 10; s <= 90; s += 5) values.push(s);
     else if (ex.unit === "m") values = [10, 20, 30, 40, 50, 60];
@@ -525,14 +725,18 @@
       const hi = ex.hi != null ? ex.hi + 4 : 20;
       for (let r = lo; r <= hi; r++) values.push(r);
     }
-    if (suggested != null && !values.includes(suggested)) values.push(suggested), values.sort((a, b) => a - b);
+    if (suggested != null && !values.includes(suggested)) values.push(suggested);
+    if (current != null && !values.includes(current)) values.push(current);
+    values.sort((a, b) => a - b);
     const unitWord = { reps: "повторів", sec: "секунд", m: "метрів" }[ex.unit];
     const quick = current == null && suggested != null
-      ? `<button class="picker-quick" data-v="${suggested}">✓ ${suggested} ${UNIT_LABEL[ex.unit]}${ex.lo != null ? " — як у цілі" : ""}</button>`
+      ? `<button class="picker-quick" data-v="${suggested}">✓ ${suggested} ${UNIT_LABEL[ex.unit]}${ex.lo != null && !fromTime ? " — як у цілі" : ""}</button>`
       : "";
     $("#pickerContent").innerHTML = `
       <div class="picker-title">Підхід ${i + 1} · скільки ${unitWord} зробив?</div>
+      <div class="picker-rest hidden" id="pickerRest"></div>
       <div class="picker-sub">${ex.name} · ціль ${targetTxt(ex)}</div>
+      ${editSet && ex.load !== "none" ? `<label class="picker-w"><small>Вага, ${ex.load === "assist" ? "lb допомоги" : "lb"}</small><input id="pickW" class="w-input" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" placeholder="—" value="${fmtW(editSet.w)}"></label>` : ""}
       ${quick}
       <div class="picker-grid">${values.map((v) => {
         const inRange = ex.lo != null && v >= ex.lo && v <= ex.hi;
@@ -541,53 +745,168 @@
       ${current != null ? `<button class="picker-clear">Скасувати підхід</button>` : ""}
     `;
     overlay.classList.remove("hidden");
+    renderTimers();
     $all(".picker-grid button, .picker-quick", overlay).forEach((b) => {
-      b.onclick = () => { overlay.classList.add("hidden"); onPick(parseInt(b.dataset.v, 10)); };
+      b.onclick = () => {
+        if (pickerFresh()) return;
+        let w;
+        const wi = $("#pickW", overlay);
+        if (editSet) {
+          w = editSet.w;
+          if (wi) {
+            const raw = wi.value.trim();
+            const v = raw === "" ? null : parseNum(raw);
+            if (raw === "" || (v != null && v >= 0 && v <= 2000)) w = v;
+            else toast(WEIGHT_ERR);
+          }
+        }
+        closeOverlay("pickerOverlay");
+        onPick(parseInt(b.dataset.v, 10), w);
+      };
     });
+    const pw = $("#pickW", overlay);
+    if (pw) pw.addEventListener("focus", () => selectAllSoon(pw));
     const clr = $(".picker-clear", overlay);
-    if (clr) clr.onclick = () => { overlay.classList.add("hidden"); onPick(null); };
+    if (clr) clr.onclick = () => { if (pickerFresh()) return; closeOverlay("pickerOverlay"); onPick(null); };
   }
 
-  // ---------- rest timer ----------
-  // Час рахуємо від годинника, а не тиками: після блокування екрана таймер показує правду.
-  const restRemaining = () => Math.max(0, Math.ceil((rest.endAt - Date.now()) / 1000));
+  // ---------- timers: work stopwatch + rest ----------
+  // Час рахуємо від годинника, а не тиками: після блокування екрана таймери показують правду.
+  const timerBusy = () => !!(timers.work || timers.rest);
+  // секундомір сесії на екрані «Сьогодні» теж потребує тика, навіть коли таймерів підходу немає
+  const clockWanted = () => !!(profile && $("#sessClock") && !$("#main").classList.contains("hidden"));
+  function saveTimers() { if (profile) lsSet(timerKey(profile), timers); }
+  function resetTimers() {
+    timers = { work: null, rest: null, pending: null };
+    saveTimers();
+    renderTimers();
+  }
+  // Перезавантаження лише непомітно: застосунок сховано, або ще при запуску — без таймерів, вікон і поля у фокусі.
+  const overlayOpen = () => $all(".sheet-overlay").some((o) => !o.classList.contains("hidden"));
+  const inputFocused = () => { const a = document.activeElement; return !!(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); };
+  function maybeReload() {
+    if (!pendingReload) return;
+    if (document.hidden) {
+      blurInside(document.body); // вписана вага зберігається як чернетка
+      location.reload();
+      return;
+    }
+    if (!touched && !timerBusy() && !overlayOpen() && !inputFocused()) location.reload();
+  }
+
+  // після перезапуску: підхід — лише сьогоднішній і молодший за 20 хв, відпочинок — лише незакінчений
+  function restoreTimers() {
+    const s = lsGet(timerKey(profile), null) || {};
+    const now = Date.now();
+    const num = (v) => typeof v === "number" && isFinite(v);
+    const w = s.work, r = s.rest, p = s.pending;
+    timers = {
+      work: w && num(w.startAt) && num(w.i) && locate(w.exId) && iso(new Date(w.startAt)) === todayISO()
+        && now - w.startAt < 20 * 60000 ? { exId: w.exId, i: w.i, startAt: w.startAt } : null,
+      rest: r && num(r.endAt) && num(r.total) && r.endAt > now ? { endAt: r.endAt, total: r.total, label: String(r.label || "") } : null,
+      pending: p && num(p.i) && num(p.t) && isTodayAt(p.at) && locate(p.exId) && !((getEntry(p.exId, todayISO()) || { sets: [] }).sets[p.i])
+        ? { exId: p.exId, i: p.i, t: p.t, at: p.at } : null
+    };
+    saveTimers();
+    renderTimers();
+  }
+
+  const workElapsed = () => Math.floor((Date.now() - timers.work.startAt) / 1000);
+  const workStopText = () => `■ Стоп · ${Z.fmtClock(workElapsed())}`;
+  const restRemaining = () => Math.max(0, Math.ceil((timers.rest.endAt - Date.now()) / 1000));
+
+  function startWork(ex, i, date) {
+    if (staleDay(date || todayISO())) return;
+    const prev = timers.work;
+    ensureSession();
+    // інший секундомір замінюємо без запису
+    timers.work = { exId: ex.id, i, startAt: Date.now() };
+    timers.pending = null;
+    if (timers.rest) finishRest(false);
+    saveTimers();
+    if (prev && prev.exId !== ex.id) rerenderCard(prev.exId);
+    rerenderCard(ex.id);
+    renderTimers();
+  }
+
+  function stopWork() {
+    const w = timers.work;
+    if (!w) return;
+    // другий дотик подвійного тапу «Старт» влучає в «Стоп» на тому самому місці — ігноруємо
+    if (Date.now() - w.startAt < 700) return;
+    const loc = locate(w.exId);
+    const date = iso(new Date(w.startAt));
+    const t = Math.max(1, Math.round((Date.now() - w.startAt) / 1000));
+    timers.work = null;
+    if (!loc || staleDay(date)) { saveTimers(); renderTimers(); return; }
+    const ex = loc.ex, i = w.i;
+    timers.pending = { exId: ex.id, i, t, at: Date.now() };
+    const plan = restPlan(ex, i, loc.partner, date);
+    if (plan) startRest(plan.sec, plan.label);
+    saveTimers();
+    renderTimers();
+    rerenderCard(ex.id);
+    openPicker(ex, i, null, suggestedValue(ex, i), (r) => recordSet(ex, date, i, r, t, { isNew: true, restStarted: true }));
+  }
+
   function startRest(sec, label) {
-    clearInterval(rest.intervalId);
-    rest.running = true;
-    rest.total = sec;
-    rest.endAt = Date.now() + sec * 1000;
-    $("#restBar").classList.remove("hidden");
-    document.body.classList.add("resting");
-    $("#restLabel").textContent = label;
-    renderRest();
-    rest.intervalId = setInterval(tickRest, 250);
+    timers.rest = { endAt: Date.now() + sec * 1000, total: sec, label };
+    saveTimers();
+    renderTimers();
   }
-  function tickRest() {
-    if (!rest.running) return;
-    renderRest();
-    if (restRemaining() <= 0) finishRest(true);
+  function tickTimers() {
+    if (timers.rest && restRemaining() <= 0) finishRest(true);
+    else renderTimers();
   }
-  function renderRest() {
-    const left = restRemaining();
-    $("#restTime").textContent = left;
-    $("#restProgress").style.width = Math.max(0, (left / rest.total) * 100) + "%";
+  // смуга внизу (секундомір має пріоритет), кнопка «Стоп» на картці, рядок у вікні повторів; один інтервал на все
+  function renderTimers() {
+    const w = timers.work, r = timers.rest;
+    const bar = $("#restBar");
+    bar.classList.toggle("hidden", !w && !r);
+    bar.classList.toggle("work", !!w);
+    document.body.classList.toggle("resting", !!(w || r));
+    $("#workActions").classList.toggle("hidden", !w);
+    $("#restActions").classList.toggle("hidden", !!w);
+    $("#restProgress").classList.toggle("hidden", !!w);
+    const left = r ? restRemaining() : 0;
+    if (w) {
+      const loc = locate(w.exId);
+      $("#restLabel").textContent = `Підхід ${w.i + 1} · ${loc ? loc.ex.name : ""}`;
+      $("#restTime").textContent = Z.fmtClock(workElapsed());
+      $all(".start-set.stop").forEach((b) => { b.textContent = workStopText(); });
+    } else if (r) {
+      $("#restLabel").textContent = r.label;
+      $("#restTime").textContent = Z.fmtClock(left);
+      $("#restProgress").style.width = Math.max(0, r.total ? (left / r.total) * 100 : 0) + "%";
+    }
+    const pr = $("#pickerRest");
+    if (pr) {
+      pr.classList.toggle("hidden", !r);
+      pr.textContent = r ? `Відпочинок · ${Z.fmtClock(left)}` : "";
+    }
+    updateSessClock();
+    const wantTick = timerBusy() || clockWanted();
+    if (wantTick && !tickId) tickId = setInterval(tickTimers, 250);
+    if (!wantTick && tickId) { clearInterval(tickId); tickId = null; }
   }
   function finishRest(natural) {
-    clearInterval(rest.intervalId);
-    rest.running = false;
-    $("#restBar").classList.add("hidden");
-    document.body.classList.remove("resting");
-    if (natural) {
+    if (!timers.rest) return;
+    // відпочинок скінчився давно (екран був заблокований) — запізнілий сигнал лише плутає
+    const late = Date.now() - timers.rest.endAt > 5000;
+    timers.rest = null;
+    saveTimers();
+    renderTimers();
+    if (natural && !late) {
       beep();
       if (navigator.vibrate) navigator.vibrate([80, 60, 80]);
     }
-    if (pendingReload) location.reload();
   }
   function adjustRest(delta) {
-    if (!rest.running) return;
-    rest.endAt = Math.max(Date.now(), rest.endAt + delta * 1000);
-    rest.total = Math.max(rest.total, restRemaining());
-    tickRest();
+    if (!timers.rest) return;
+    timers.rest.endAt = Math.max(Date.now(), timers.rest.endAt + delta * 1000);
+    timers.rest.total = Math.max(timers.rest.total, restRemaining());
+    saveTimers();
+    tickTimers();
   }
 
   // iPhone не вібрує з браузера, тож кінець відпочинку — коротким сигналом.
@@ -599,7 +918,8 @@
         if (!AC) return;
         audioCtx = new AC();
       }
-      if (audioCtx.state === "suspended") audioCtx.resume();
+      // "suspended" або "interrupted" (після блокування екрана)
+      if (audioCtx.state !== "running") { const p = audioCtx.resume(); if (p && p.catch) p.catch(() => {}); }
     } catch (e) {}
   }
   function beep() {
@@ -621,11 +941,108 @@
     } catch (e) {}
   }
 
+  // ---------- session: час усього тренування ----------
+  // Сесія дня — лише запис із ключем сьогоднішньої дати; вчорашня незавершена сьогоднішній годинник не заводить.
+  const todaySession = () => { const s = getSessions()[todayISO()]; return s && typeof s.start === "number" ? s : null; };
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const fmtHM = (ms) => { const d = new Date(ms); return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); };
+  const fmtMin = (ms) => Math.round(ms / 60000) + " хв";
+
+  function ensureSession() {
+    const all = getSessions();
+    const date = todayISO();
+    const s = all[date];
+    if (!s || typeof s.start !== "number") all[date] = { start: Date.now(), end: null, last: null, day: selectedDay };
+    else if (s.end != null) s.end = null; // тренування продовжено
+    else return;
+    saveSessions(all);
+    refreshSessionUI();
+  }
+
+  // dayId — день програми, на якому записано підхід: за ним showMain відкриває вкладку після перезапуску
+  function touchSession(dayId) {
+    const all = getSessions();
+    const s = all[todayISO()];
+    if (!s) return;
+    s.last = Date.now();
+    if (dayId) s.day = dayId;
+    saveSessions(all);
+  }
+
+  // auto — тренування закрилось само (всі вправи зроблено)
+  function finishSession(auto) {
+    const all = getSessions();
+    const s = all[todayISO()];
+    if (!s || s.end != null) {
+      if (auto) toast("Тренування завершено! Шейк і сніданок 🥤");
+      return;
+    }
+    // секундомір підходу зупиняємо без запису, відпочинок — без сигналу
+    const w = timers.work;
+    timers.work = null;
+    timers.pending = null;
+    saveTimers();
+    if (w) rerenderCard(w.exId);
+    finishRest(false);
+    // жодного записаного підходу — тренування не було, рядок «0 хв» в історії не потрібен
+    if (s.last == null) {
+      delete all[todayISO()];
+      saveSessions(all);
+      refreshSessionUI();
+      renderTimers();
+      toast("Тренування скасовано");
+      return;
+    }
+    s.end = Date.now();
+    saveSessions(all);
+    refreshSessionUI();
+    renderTimers();
+    const dur = fmtMin(Z.sessionMs(s));
+    toast(auto ? `Тренування завершено: ${dur}. Шейк і сніданок 🥤` : `Тренування: ${dur}`);
+  }
+
+  // чип з годинником, картка завершеного тренування й кнопка «Завершити» — залежно від сесії за сьогодні
+  function refreshSessionUI() {
+    ["sessClock", "sessCard", "sessFinish"].forEach((id) => { const e = $("#" + id); if (e) e.remove(); });
+    const content = $("#dayContent");
+    const meta = $(".day-meta", content);
+    if (!meta) return;
+    const s = todaySession();
+    if (s && s.end == null) {
+      const chip = document.createElement("span");
+      chip.className = "chip clock";
+      chip.id = "sessClock";
+      chip.dataset.start = String(s.start);
+      meta.appendChild(chip);
+      const btn = document.createElement("button");
+      btn.className = "primary-btn";
+      btn.id = "sessFinish";
+      btn.textContent = "Завершити тренування";
+      btn.onclick = () => finishSession(false);
+      content.appendChild(btn);
+    } else if (s) {
+      const card = document.createElement("div");
+      card.className = "note-card sess-card";
+      card.id = "sessCard";
+      card.textContent = `Тренування: ${fmtHM(s.start)}–${fmtHM(s.end)} · ${fmtMin(Z.sessionMs(s))}`;
+      meta.parentNode.after(card);
+    }
+    updateSessClock();
+    renderTimers();
+  }
+
+  function updateSessClock() {
+    const el = $("#sessClock");
+    if (!el) return;
+    el.textContent = "⏱ " + Z.fmtClock((Date.now() - Number(el.dataset.start)) / 1000);
+  }
+
   // Повернулись у застосунок: оновити таймер, а якщо настав новий день — перемалювати.
   function onResume() {
     if (document.hidden) return;
-    if (rest.running) tickRest();
+    if (timerBusy()) tickTimers();
     if (P && profile && P[profile] && renderedDate && renderedDate !== todayISO()) {
+      resetTimers();
       if (currentTab === "today") showMain();
       else { renderedDate = todayISO(); showTab(currentTab); }
     }
@@ -635,19 +1052,36 @@
   }
 
   // ---------- exercise sheet ----------
+  // «50 lb × 10 / 9 / 8» або, коли вага різна, «50×10 · 55×9 · 60×8»
+  function histSets(e, unit) {
+    const d = Z.doneSets(e);
+    const ws = d.map((s) => s.w);
+    if (ws.every((w) => w == null)) return d.map((s) => s.r).join(" / ");
+    if (ws.every((w) => w === ws[0])) return `${fmtW(ws[0])} ${unit} × ${d.map((s) => s.r).join(" / ")}`;
+    return d.map((s) => (s.w != null ? fmtW(s.w) + "×" : "") + s.r).join(" · ");
+  }
   function openExerciseSheet(ex) {
+    const goalUnit = ex.unit === "sec" ? "секунд" : ex.unit === "m" ? "метрів" : "повторів";
+    const goalHtml = ex.unit === "done" ? "" : `
+      <div class="section-title">Ціль</div>
+      <div class="goal-row">
+        <label>Підходи<input id="goalN" type="text" inputmode="numeric" enterkeyhint="done"></label>
+        ${ex.lo == null ? "" : `<label>від (${goalUnit})<input id="goalLo" type="text" inputmode="numeric" enterkeyhint="done"></label>
+        <label>до (${goalUnit})<input id="goalHi" type="text" inputmode="numeric" enterkeyhint="done"></label>`}
+      </div>
+      <button id="goalReset" class="link-btn hidden"></button>`;
     const h = history(ex.id).slice(-8).reverse();
     const unit = ex.load === "assist" ? "lb доп." : "lb";
     const hist = h.length
       ? `<div class="section-title">Журнал</div><div class="hist-table">${h.map((e) => `
           <div class="hrow"><span>${fmtDate(e.date)}${e.deload ? " <i>deload</i>" : ""}</span>
-          <span>${e.weight != null ? e.weight + " " + unit : ""}</span>
-          <span class="reps">${ex.unit === "done" ? "✓" : e.reps.map((r) => (r == null ? "–" : r)).join(" / ")}</span></div>`).join("")}</div>`
+          <span class="reps">${ex.unit === "done" ? "✓" : histSets(e, unit)}</span></div>`).join("")}</div>`
       : "";
     $("#sheetContent").innerHTML = `
       <img src="${ex.img}" alt="">
       <h2><span class="ex-code">${ex.code}</span>${ex.name}</h2>
       <div class="sheet-sets">${ex.sets}${ex.note ? ` · <span>${ex.note}</span>` : ""}</div>
+      ${goalHtml}
       <ul class="cues">${ex.cues.map((c) => `<li>${c}</li>`).join("")}</ul>
       ${ex.prio ? `<div class="note-card">Останній підхід — до відмови або за 1 повтор до неї.</div>` : ""}
       ${ex.base ? `<div class="note-card">Базова вправа — ніколи до відмови. Крок прогресії +${ex.step} lb.</div>` : ""}
@@ -656,7 +1090,57 @@
     `;
     $("#sheetOverlay").classList.remove("hidden");
     $("#sheet").scrollTop = 0;
-    $("#closeSheetBtn").onclick = () => $("#sheetOverlay").classList.add("hidden");
+    $("#closeSheetBtn").onclick = () => closeOverlay("sheetOverlay");
+    if (ex.unit !== "done") wireGoal(ex);
+  }
+
+  // редагування цілі: поля, збереження в плані, оновлення листа й карток
+  function wireGoal(ex0) {
+    const id = ex0.id;
+    const fN = $("#goalN"), fLo = $("#goalLo"), fHi = $("#goalHi"), reset = $("#goalReset");
+    const cur = () => { const l = locate(id); return l ? l.ex : ex0; };
+    function fill() {
+      const ex = cur();
+      fN.value = ex.n;
+      if (fLo) { fLo.value = ex.lo; fHi.value = ex.hi; }
+      const sets = $("#sheetContent .sheet-sets");
+      if (sets) sets.innerHTML = `${ex.sets}${ex.note ? ` · <span>${ex.note}</span>` : ""}`;
+      const has = !!getPlan()[id];
+      reset.classList.toggle("hidden", !has);
+      const raw = rawEx(id);
+      reset.textContent = `Як у програмі (${Z.setsLabel(raw)})`;
+    }
+    function refresh() { fill(); renderDay(); }
+    function commit() {
+      const ex = cur(), raw = rawEx(id);
+      const num = (f, d) => { const v = parseInt(f.value, 10); return isFinite(v) ? v : d; };
+      const eff = Z.applyPlan(raw, { n: num(fN, ex.n), lo: fLo ? num(fLo, ex.lo) : undefined, hi: fHi ? num(fHi, ex.hi) : undefined });
+      const ov = {};
+      if (eff.n !== raw.n) ov.n = eff.n;
+      if (raw.lo != null) {
+        if (eff.lo !== raw.lo) ov.lo = eff.lo;
+        if (eff.hi !== raw.hi) ov.hi = eff.hi;
+      }
+      const plan = getPlan();
+      if (Object.keys(ov).length) plan[id] = ov; else delete plan[id];
+      if (!savePlan(plan)) { fill(); return; }
+      invalidateProg();
+      refresh();
+    }
+    [fN, fLo, fHi].forEach((f) => {
+      if (!f) return;
+      f.onfocus = () => selectAllSoon(f);
+      f.onkeydown = (e) => { if (e.key === "Enter") f.blur(); };
+      f.onchange = commit;
+    });
+    reset.onclick = () => {
+      const plan = getPlan();
+      delete plan[id];
+      if (!savePlan(plan)) return;
+      invalidateProg();
+      refresh();
+    };
+    fill();
   }
 
   // ---------- settings ----------
@@ -677,7 +1161,8 @@
     `;
     overlay.classList.remove("hidden");
     $("#switchProfileBtn").onclick = () => {
-      overlay.classList.add("hidden");
+      closeOverlay("settingsOverlay");
+      resetTimers();
       localStorage.removeItem("wa2_profile");
       profile = null;
       showOnboard();
@@ -692,7 +1177,7 @@
       renderDay();
     };
     $("#exportBtn").onclick = () => {
-      const payload = { app: "veeter", profile, meta: getMeta(), log: getLog(), body: getBody() };
+      const payload = { app: "veeter", v: 3, profile, meta: getMeta(), log: getLog(), body: getBody(), sessions: getSessions(), plan: getPlan() };
       const name = `veeter-${profile}-${todayISO()}.json`;
       const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
       // на iPhone надійніше через «Поділитися» → «Зберегти у Файли»
@@ -717,33 +1202,53 @@
       f.text().then((t) => {
         let d;
         try { d = JSON.parse(t); } catch (err) { toast("Файл не схожий на копію журналу"); return; }
-        const log = d && d.app === "veeter" ? cleanLog(d.log) : null;
-        const body = log ? cleanBody(d.body) : null;
-        if (!log || !body) { toast("Файл не схожий на копію журналу"); return; }
+        const ok = d && d.app === "veeter";
+        let log = null, sessions = null, plan = null;
+        if (ok && d.v === 3) {
+          log = Z.cleanLogV3(d.log);
+          sessions = Z.cleanSessions(d.sessions);
+          plan = Z.cleanPlan(d.plan);
+        } else if (ok && d.v === undefined) {
+          const old = cleanLogV2(d.log);
+          log = old ? Z.migrateLogV2(old) : null;
+          sessions = {};
+          plan = {};
+        }
+        const body = log && sessions && plan ? cleanBody(d.body) : null;
+        if (!log || !sessions || !plan || !body) { toast("Файл не схожий на копію журналу"); return; }
         if (d.profile !== profile && !confirm(`Це копія профілю «${(P[d.profile] || {}).name || d.profile}». Завантажити в «${prog().name}»?`)) return;
         if (!confirm("Замінити поточний журнал даними з файлу?")) return;
         saveLog(log);
         saveBody(body);
+        if (d.v === 3) {
+          saveSessions(sessions);
+          lsSet(planKey(profile), plan);
+          invalidateProg();
+        }
         if (d.meta && isISO(d.meta.startDate)) saveMeta({ startDate: mondayOf(new Date(d.meta.startDate + "T00:00:00")) });
-        overlay.classList.add("hidden");
+        closeOverlay("settingsOverlay");
         showMain();
         toast("Журнал відновлено");
       });
     };
     $("#clearBtn").onclick = () => {
       if (confirm("Видалити весь журнал і заміри цього профілю? Спершу зроби експорт, якщо потрібна копія.")) {
-        localStorage.removeItem(logKey(profile));
+        // wa3_plan_ (ціль) і wa2_log_ (стара копія) не чіпаємо
+        // порожній v3-журнал (не видалений ключ), інакше ensureMigrated підтягне стару копію wa2 назад
+        lsSet(logKey(profile), {});
+        localStorage.removeItem(sessKey(profile));
+        resetTimers();
         localStorage.removeItem(bodyKey(profile));
-        overlay.classList.add("hidden");
+        closeOverlay("settingsOverlay");
         renderDay();
         toast("Журнал очищено");
       }
     };
-    $("#closeSettingsBtn").onclick = () => overlay.classList.add("hidden");
+    $("#closeSettingsBtn").onclick = () => closeOverlay("settingsOverlay");
   }
 
   // Пропускаємо в журнал лише числа й дати потрібного формату — зламаний файл нічого не зламає.
-  function cleanLog(log) {
+  function cleanLogV2(log) {
     if (!log || typeof log !== "object" || Array.isArray(log)) return null;
     const out = {};
     for (const [id, arr] of Object.entries(log)) {
@@ -774,7 +1279,7 @@
     const content = $("#progressContent");
     const log = getLog();
     const dates = new Set();
-    Object.values(log).forEach((arr) => Array.isArray(arr) && arr.forEach((e) => { if (e && hasReps(e)) dates.add(e.date); }));
+    Object.values(log).forEach((arr) => Array.isArray(arr) && arr.forEach((e) => { if (e && Z.doneSets(e).length) dates.add(e.date); }));
     const weekStart = mondayOf(new Date());
     const thisWeek = [...dates].filter((d) => d >= weekStart).length;
 
@@ -799,16 +1304,39 @@
     if (!any) {
       content.innerHTML += '<div class="empty-state"><span class="emoji">📈</span>Відміть перші підходи на вкладці «Сьогодні» — графіки з\'являться тут.</div>';
     }
+    renderSessionHistory(content);
+  }
+
+  // останні 10 тренувань: дата, години, тривалість; без тривалості й сьогоднішнє незавершене — пропускаємо
+  function renderSessionHistory(content) {
+    const all = getSessions();
+    const today = todayISO();
+    const rows = Object.keys(all).sort().reverse()
+      .filter((d) => isISO(d) && all[d] && typeof all[d].start === "number" && Z.sessionMs(all[d]) != null && !(d === today && all[d].end == null))
+      .slice(0, 10);
+    if (!rows.length) return;
+    const t = document.createElement("div");
+    t.className = "section-title";
+    t.textContent = "Історія тренувань";
+    content.appendChild(t);
+    const table = document.createElement("div");
+    table.className = "hist-table";
+    table.innerHTML = rows.map((d) => {
+      const s = all[d];
+      return `<div class="hrow"><span>${fmtDate(d)}</span><span>${fmtHM(s.start)}–${fmtHM(s.end != null ? s.end : s.last)}</span><span class="reps">${fmtMin(Z.sessionMs(s))}</span></div>`;
+    }).join("");
+    content.appendChild(table);
   }
 
   function progressCard(ex) {
     const all = history(ex.id);
     const work = all.filter((e) => !e.deload);
     const h = work.length ? work : all;
-    const useWeight = ex.load !== "none" && h.some((e) => e.weight != null);
+    const tw = (e) => Z.topWeight(e, ex.load);
+    const useWeight = ex.load !== "none" && h.some((e) => tw(e) != null);
     const pts = useWeight
-      ? h.filter((e) => e.weight != null).map((e) => e.weight)
-      : h.map((e) => Math.max(0, ...e.reps.filter((r) => r != null)));
+      ? h.filter((e) => tw(e) != null).map(tw)
+      : h.map((e) => Math.max(0, ...Z.doneSets(e).map((s) => s.r)));
     const unit = useWeight ? (ex.load === "assist" ? "lb доп." : "lb") : UNIT_LABEL[ex.unit];
     const first = pts[0], last = pts[pts.length - 1];
     const delta = last - first;
@@ -820,7 +1348,7 @@
       <div class="hname"><span class="ex-code">${ex.code}</span>${ex.name}</div>
       <canvas></canvas>
       <div class="hist-meta">
-        <span>${fmtDate(h[0].date)} → ${fmtDate(lastE.date)} · ${lastE.reps.filter((r) => r != null).join("/")}</span>
+        <span>${fmtDate(h[0].date)} → ${fmtDate(lastE.date)} · ${Z.doneSets(lastE).map((s) => s.r).join("/")}</span>
         <span class="${delta ? (better ? "good" : "bad") : ""}">${last} ${unit}${delta ? ` (${delta > 0 ? "+" : ""}${delta})` : ""}</span>
       </div>
     `;
@@ -927,7 +1455,10 @@
       <ul class="guide-list">${pr.progression.map((b) => `<li>${b}</li>`).join("")}</ul>
       <div class="section-title">Як працює журнал</div>
       <ul class="guide-list">
-        <li>Зробив підхід — тисни на квадратик і вибери, скільки вийшло (ціль підсвічена, вистачить одного дотику). Після цього стартує таймер, навіть після останнього підходу — до наступної вправи.</li><li>Вагу міняй кнопками −/+ або тисни «точно ›»: ±10, ±5, ±1, ±0,5 lb чи введи число.</li>
+        <li>Впиши вагу у віконце “зараз”, тисни “Старт” і роби підхід. Закінчив — “Стоп”, вибери, скільки повторів вийшло. Відпочинок стартує сам.</li>
+        <li>“Старт” можна пропустити: тисни на квадратик підходу й запиши повтори.</li>
+        <li>“Минулого разу” показує той самий підхід минулого тренування.</li>
+        <li>Ціль (підходи й повтори) міняється в картці вправи — тисни на назву.</li>
         <li>Тисни на заповнений квадратик — виправ кількість повторів або скасуй підхід.</li>
         <li>Коли всі підходи на верхній межі, з тижня 3 застосунок сам підставить нову вагу за правилом вище (у гравітроні — менше допомоги).</li>
         <li>Кожен 6-й тиждень — deload: 2 підходи і вага −40% підставляються автоматично.</li>
@@ -951,6 +1482,64 @@
     if (tab === "progress") renderProgress();
     if (tab === "body") renderBody();
     if (tab === "guide") renderGuide();
+    renderTimers();
+  }
+
+  // Єдиний спосіб закрити вікно (кнопка, фон, свайп, дії всередині)
+  function closeOverlay(id) {
+    const ov = $("#" + id);
+    const a = document.activeElement;
+    if (a && a !== document.body && a.blur) a.blur();
+    ov.classList.add("hidden");
+    const sh = $(".sheet", ov);
+    if (sh) { sh.classList.remove("dragging"); sh.style.transform = ""; }
+  }
+
+  // Закриття вікна свайпом униз (лише touch)
+  function enableSheetSwipe(id) {
+    const ov = $("#" + id);
+    const sh = $(".sheet", ov);
+    let tid = null, startY = 0, startX = 0, dy = 0, state = "idle"; // idle | pending | drag | off
+    const find = (list) => { for (const t of list) if (t.identifier === tid) return t; return null; };
+    const reset = () => {
+      tid = null; dy = 0; state = "idle";
+      sh.classList.remove("dragging");
+      sh.style.transform = "";
+    };
+    sh.addEventListener("touchstart", (e) => {
+      if (tid !== null) return; // додаткові пальці ігноруємо
+      const t = e.changedTouches[0];
+      const onHandle = !!e.target.closest(".sheet-handle");
+      if (!onHandle) {
+        if (e.target.closest("input, textarea, select, button, canvas, a")) return;
+        if (sh.scrollTop > 0) return;
+      }
+      tid = t.identifier; startY = t.clientY; startX = t.clientX; dy = 0; state = "pending";
+    }, { passive: true });
+    sh.addEventListener("touchmove", (e) => {
+      if (state === "idle" || state === "off") return;
+      const t = find(e.changedTouches);
+      if (!t) return;
+      const mx = t.clientX - startX;
+      dy = t.clientY - startY;
+      if (state === "pending") {
+        if (Math.abs(dy) < 8 && Math.abs(mx) < 8) return;
+        if (dy <= 0 || Math.abs(mx) > Math.abs(dy)) { state = "off"; return; }
+        state = "drag";
+        sh.classList.add("dragging");
+      }
+      if (dy < 0) dy = 0;
+      sh.style.transform = "translateY(" + dy + "px)";
+      e.preventDefault();
+    }, { passive: false });
+    const end = (e, allowClose) => {
+      if (tid === null || !find(e.changedTouches)) return;
+      const close = allowClose && state === "drag" && dy > 90;
+      reset();
+      if (close) closeOverlay(id);
+    };
+    sh.addEventListener("touchend", (e) => end(e, true));
+    sh.addEventListener("touchcancel", (e) => end(e, false));
   }
 
   function bindGlobalEvents() {
@@ -962,13 +1551,22 @@
     $("#profileBtn").onclick = openSettings;
     $("#settingsBtn").onclick = openSettings;
     ["sheetOverlay", "settingsOverlay", "pickerOverlay"].forEach((id) => {
-      $("#" + id).addEventListener("click", (e) => { if (e.target.id === id) e.target.classList.add("hidden"); });
+      $("#" + id).addEventListener("click", (e) => {
+        if (e.target.id !== id) return;
+        if (id === "pickerOverlay" && pickerFresh()) return;
+        closeOverlay(id);
+      });
+      enableSheetSwipe(id);
     });
-    document.addEventListener("pointerdown", unlockAudio, { passive: true });
+    // WebKit дозволяє звук лише з touchend / click, pointerdown — на інших пристроях
+    ["pointerdown", "touchend", "click"].forEach((t) => document.addEventListener(t, unlockAudio, { passive: true }));
+    ["pointerdown", "keydown"].forEach((t) => document.addEventListener(t, () => { touched = true; }, { passive: true, capture: true }));
+    document.addEventListener("visibilitychange", () => { if (document.hidden) maybeReload(); });
     document.addEventListener("visibilitychange", onResume);
     window.addEventListener("pageshow", onResume);
     window.addEventListener("focus", onResume);
     $("#restSkip").onclick = () => finishRest(false);
+    $("#workStop").onclick = stopWork;
     $("#restPlus").onclick = () => adjustRest(15);
     $("#restMinus").onclick = () => adjustRest(-15);
   }

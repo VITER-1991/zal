@@ -1,9 +1,10 @@
-const CACHE = "zal-v6";
+const CACHE = "zal-v7";
 const CORE_ASSETS = [
   "./",
   "index.html",
   "style.css",
   "app.js",
+  "core.js",
   "manifest.webmanifest",
   "data/programs.json",
   "icons/icon-192.png",
