@@ -13,6 +13,9 @@
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="style.css">
+<!-- Structural rules only, so a v9 page still scrolls when a slow network pairs it with a cached v8 style.css
+     (the v8 app.js guard cannot tell). No visual values here; everything visual lives in style.css tokens. -->
+<style>.today-scroll{flex:1 1 0;min-height:0;overflow-y:auto}.day-strip{position:absolute;visibility:hidden}</style>
 </head>
 <body>
 <svg class="sprite" width="0" height="0" aria-hidden="true">
@@ -39,6 +42,7 @@
 <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l16 0"/><path d="M10 11l0 6"/><path d="M14 11l0 6"/><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12"/><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3"/></symbol>
 <symbol id="i-barbell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h1"/><path d="M6 8h-2a1 1 0 0 0 -1 1v6a1 1 0 0 0 1 1h2"/><path d="M6 7v10a1 1 0 0 0 1 1h1a1 1 0 0 0 1 -1v-10a1 1 0 0 0 -1 -1h-1a1 1 0 0 0 -1 1z"/><path d="M9 12h6"/><path d="M15 7v10a1 1 0 0 0 1 1h1a1 1 0 0 0 1 -1v-10a1 1 0 0 0 -1 -1h-1a1 1 0 0 0 -1 1z"/><path d="M18 8h2a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-2"/><path d="M22 12h-1"/></symbol>
 <symbol id="i-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12z"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M4 11h16"/><path d="M11 15h1"/><path d="M12 15v3"/></symbol>
+<symbol id="i-device-mobile-rotated" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6m0 2a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2z"/><path d="M20 11v2"/><path d="M7 12h-.01"/></symbol>
 </svg>
 
 <div id="app">
@@ -63,6 +67,8 @@
 
   <!-- Main app -->
   <div id="main" class="screen hidden">
+    <button id="dayStrip" class="day-strip" type="button" aria-label="Нагору"></button>
+    <div id="todayScroll" class="today-scroll">
     <header class="topbar">
       <button id="profileBtn" class="profile-chip"></button>
       <div class="brand">ZAL</div>
@@ -74,6 +80,7 @@
     <nav id="dayTabs" class="day-tabs"></nav>
 
     <main id="dayContent" class="day-content"></main>
+    </div>
 
     <nav class="tabbar">
       <button class="tab-btn active" data-tab="today"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-flame"/></svg><span>Сьогодні</span></button>
@@ -163,6 +170,9 @@
   </div>
 
   <div id="toast" class="toast hidden"></div>
+
+  <!-- Landscape: portrait-only cover (spec v9 §4.4); toggled by checkRotate, never by showTab/showMain -->
+  <div id="rotateCover" class="rotate-cover hidden"><svg class="ic lg" width="24" height="24" aria-hidden="true"><use href="#i-device-mobile-rotated"/></svg><span>Поверни телефон вертикально</span></div>
 </div>
 
 <script src="core.js"></script>

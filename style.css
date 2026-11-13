@@ -37,7 +37,9 @@
   --ease:150ms ease-out;
   --safe-top:env(safe-area-inset-top, 0px);
   --safe-bottom:env(safe-area-inset-bottom, 0px);
-  --tabbar-h:56px;
+  --tabbar-h:48px;
+  --tabbar-inset:max(calc(var(--safe-bottom) - 14px), 6px); /* нижній відступ панелі: інсет мінус 14, але не менше 6 (варіант 3 з diag-2) */
+  --strip-segs-w:72px; /* ширина блоку сегментів у тонкій смужці */
   --timerbar-h:117px; /* фактична висота смуги таймера (116.8 px в обох станах на 375 і 320) */
 }
 
@@ -46,6 +48,14 @@
 /* усі числа — tabular-nums (спека §4.2); !important, бо `font:var(--t-…)` у кожному правилі скидає font-variant-numeric */
 *, *::before, *::after{font-variant-numeric:tabular-nums !important;}
 html,body{height:100%;}
+html{overscroll-behavior:none;} /* сторінка сама не відскакує: прибиті шари не зсуваються */
+/* текст не збільшується після повороту екрана */
+html{-webkit-text-size-adjust:100%; text-size-adjust:100%;}
+/* iOS 26 дає встановленому застосунку viewport, коротший на статус-бар (WebKit 301108); сторінка заввишки не менше за екран
+   отримує повний viewport; обмеження 100lvh не дає прокручуватись телефонам без цієї вади (спека v9 §4.1) */
+@media (display-mode: standalone){
+  html{min-height:min(100lvh, calc(100% + var(--safe-top)));}
+}
 body{
   margin:0; background:var(--bg); color:var(--text); font:var(--t-body);
   overscroll-behavior-y:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
@@ -122,7 +132,7 @@ input, textarea{font:var(--t-title); color:var(--text); -webkit-user-select:text
 /* ============ Оболонка: нижня панель (спека §6.9) ============ */
 .tabbar{
   position:fixed; left:0; right:0; bottom:0; z-index:30; display:flex;
-  height:calc(var(--tabbar-h) + var(--safe-bottom)); padding:0 0 var(--safe-bottom);
+  height:calc(var(--tabbar-h) + var(--tabbar-inset)); padding:0 0 var(--tabbar-inset);
   background:var(--bg); border-top:1px solid var(--line);
 }
 .tab-btn{
@@ -135,11 +145,36 @@ input, textarea{font:var(--t-title); color:var(--text); -webkit-user-select:text
 /* ============ Оболонка: вміст екрана ============ */
 .day-content{
   flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch;
-  padding:var(--s-1) var(--s-4) calc(var(--tabbar-h) + var(--safe-bottom) + var(--s-6));
+  padding:var(--s-1) var(--s-4) calc(var(--tabbar-h) + var(--tabbar-inset) + var(--s-6));
 }
 body.resting .day-content{
-  padding-bottom:calc(var(--tabbar-h) + var(--safe-bottom) + var(--s-6) + var(--timerbar-h));
+  padding-bottom:calc(var(--tabbar-h) + var(--tabbar-inset) + var(--s-6) + var(--timerbar-h));
 }
+/* «Сьогодні» (спека v9 §4.3): інсет статус-бару — єдине прибите місце вгорі; верхня панель, рядок тижня,
+   вкладки днів і список прокручуються разом в одному елементі */
+/* :has — лише коли сторінка вже v9 (є обгортка): старий index.html з кешу + новий style.css не отримує подвійного інсету */
+#main:has(> #todayScroll){padding-top:var(--safe-top);}
+.today-scroll{
+  position:relative; flex:1 1 0; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch;
+  overscroll-behavior-y:contain; /* відскок на краю списку не тягне за собою сторінку */
+  scroll-padding-top:var(--tap); /* поле у фокусі не ховається під тонкою смужкою */
+}
+.today-scroll .topbar{padding-top:var(--s-2);} /* інсет уже в #main */
+.today-scroll .day-content{flex:none; overflow:visible;}
+
+/* ============ «Сьогодні»: тонка смужка (спека v9 §4.3, Плазма §6.20) ============ */
+/* схована через visibility, а не display: розмір лишається, тож поріг появи не стрибає; без переходів */
+.day-strip{
+  position:absolute; top:var(--safe-top); left:0; right:0; z-index:20;
+  display:flex; align-items:center; gap:var(--s-3); min-height:var(--tap); padding:0 var(--s-4);
+  border:0; border-bottom:1px solid var(--line); border-radius:0;
+  background:var(--bg); color:var(--text); font:var(--t-title); text-align:left;
+  visibility:hidden;
+}
+.day-strip.show{visibility:visible;}
+.strip-title{flex:1; min-width:0;}
+.day-strip .segs{flex:0 0 auto; width:var(--strip-segs-w);}
+.day-strip .pill{flex-shrink:0;}
 
 /* ============ «Сьогодні»: рядок тижня (спека §6.2) ============ */
 .banner{flex-shrink:0; padding:0 var(--s-4) var(--s-3);}
@@ -292,7 +327,7 @@ body.resting .day-content{
 /* ============ Смуга таймера (спека §6.8) ============ */
 /* відпочинок — заливка --rest, підхід (клас work) — заливка --accent; кнопки «навиворіт» */
 .rest-bar{
-  position:fixed; left:var(--s-4); right:var(--s-4); bottom:calc(var(--tabbar-h) + var(--safe-bottom) + var(--s-2)); z-index:40;
+  position:fixed; left:var(--s-4); right:var(--s-4); bottom:calc(var(--tabbar-h) + var(--tabbar-inset) + var(--s-2)); z-index:40;
   padding:var(--s-3) var(--s-4) var(--s-4); border-radius:var(--r-card); overflow:hidden;
   background:var(--rest); color:var(--on-rest);
 }
@@ -429,6 +464,12 @@ body.resting .day-content{
   padding:var(--s-6) var(--s-4); color:var(--text-2); font:var(--t-body); text-align:center;
 }
 .empty-state.fatal{min-height:100%; justify-content:center; color:var(--text);}
+/* екран «Поверни телефон вертикально» (спека v9 §4.4, Плазма §6.21): накриває все, вище вікон (50) і тосту (60);
+   не .screen — його не ховають showTab/showMain */
+.rotate-cover{
+  position:fixed; inset:0; z-index:70; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:var(--s-3); padding:var(--s-6) var(--s-4); background:var(--bg); color:var(--text); font:var(--t-body); text-align:center;
+}
 
 /* ============ «Прогрес» (спека §6.15, §5) ============ */
 .stat-grid{display:flex; gap:var(--s-2);}

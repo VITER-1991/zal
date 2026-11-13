@@ -2,12 +2,16 @@
 (function () {
   "use strict";
 
-  // Файли різних версій (старий index.html без core.js чи без спрайта, старий style.css без токенів) із новим app.js —
+  // Файли різних версій (старий index.html без core.js чи без спрайта, старий style.css без токенів; з v9 — старий
+  // index.html без обгортки прокрутки #todayScroll, старий style.css без токена --tabbar-inset) із новим app.js —
   // перший запуск після оновлення на слабкому інтернеті. Стилі в <head> блокують цей скрипт, тож токен уже читається.
   // Один раз за сесію вкладки просимо service worker оновитись і перезавантажуємось; вдруге — лише повідомлення.
+  const rootStyle = getComputedStyle(document.documentElement);
   if (typeof ZalCore === "undefined" || !document.getElementById("workStop") ||
       !document.querySelector("svg.sprite symbol") ||
-      getComputedStyle(document.documentElement).getPropertyValue("--tap").trim() === "") {
+      !document.getElementById("todayScroll") ||
+      rootStyle.getPropertyValue("--tap").trim() === "" ||
+      rootStyle.getPropertyValue("--tabbar-inset").trim() === "") {
     const FLAG = "zal_mixed_reload";
     let tried = false;
     try { tried = sessionStorage.getItem(FLAG) === "1"; } catch (e) {}
@@ -58,6 +62,8 @@
   let dayDoneCount = 0;      // скільки вправ було виконано, щоб тост «завершено» не повторювався
   let pendingReload = false; // нова версія застосунку чекає, поки застосунок сховають
   let touched = false;       // користувач уже щось натискав після запуску
+  // пам'ять прокрутки «Сьогодні»: останній scrollTop #todayScroll і день, для якого він записаний
+  let todayTop = 0, todayTopDay = null;
   let audioCtx = null;
 
   const $ = (sel, root) => (root || document).querySelector(sel);
@@ -198,6 +204,7 @@
 
   function boot() {
     bindGlobalEvents();
+    checkRotate();
     if (!profile || !P[profile]) showOnboard();
     else showMain();
   }
@@ -265,6 +272,7 @@
     restoreTimers();
     renderBanner();
     renderDayTabs();
+    todayTop = 0; todayTopDay = null;
     renderDay();
   }
 
@@ -385,7 +393,11 @@
     const content = $("#dayContent");
     blurInside(content);
     content.innerHTML = "";
-    if (!day) return;
+    if (!day) {
+      $("#dayStrip").innerHTML = "";
+      updateDayStrip();
+      return;
+    }
     const date = todayISO();
     const exs = dayExercises(day);
     const doneCount = exs.filter((ex) => isExDone(ex, getEntry(ex.id, date))).length;
@@ -404,6 +416,8 @@
       ${selectedDay !== nowDayId() ? `<div class="day-hint">${icon("calendar")}<span>Записи підуть на сьогоднішню дату (${fmtDate(date)}).</span></div>` : ""}
     `;
     content.appendChild(head);
+    // смужку наповнюємо до refreshSessionUI: той додає в неї годинник
+    fillDayStrip(day, exs.length, doneCount);
 
     if (day.together) {
       const w = document.createElement("div");
@@ -439,6 +453,27 @@
     }
     refreshSessionUI();
     refreshPrimaryStart();
+    // пам'ять прокрутки: той самий день — повертаємо позицію, інший — нагору; схований екран поверне наступний showTab("today")
+    if (!$("#main").classList.contains("hidden")) {
+      const sc = $("#todayScroll");
+      if (selectedDay !== todayTopDay) { todayTopDay = selectedDay; todayTop = 0; }
+      sc.scrollTop = todayTop;
+      updateDayStrip();
+    }
+  }
+
+  // Тонка смужка (спека v9 §4.3): назва дня і сегменти; годинник додає refreshSessionUI
+  function fillDayStrip(day, total, done) {
+    $("#dayStrip").innerHTML = '<span class="strip-title">' + day.title + "</span>" + segs(total, done);
+  }
+
+  // Смужку видно, коли нижній край назви дня піднявся вище за нижній край смужки.
+  // Обидва краї міряються тут, у момент виклику; нічого не зберігається між викликами.
+  function updateDayStrip() {
+    if ($("#main").classList.contains("hidden")) return;
+    const strip = $("#dayStrip"), title = $("#dayContent .day-title");
+    const show = !!title && title.getBoundingClientRect().bottom <= strip.getBoundingClientRect().bottom;
+    strip.classList.toggle("show", show);
   }
 
   function updateDayProgress() {
@@ -449,6 +484,8 @@
     if (el) el.textContent = `${n} з ${exs.length} вправ`;
     const sg = $(".day-progress .segs");
     if (sg) sg.outerHTML = segs(exs.length, n);
+    const ss = $("#dayStrip .segs");
+    if (ss) ss.outerHTML = segs(exs.length, n);
     if (n === exs.length && dayDoneCount < exs.length) finishSession(true);
     dayDoneCount = n;
   }
@@ -1078,7 +1115,7 @@
 
   // чип з годинником, картка завершеного тренування й кнопка «Завершити» — залежно від сесії за сьогодні
   function refreshSessionUI() {
-    ["sessClockWrap", "sessCard", "sessFinish"].forEach((id) => { const e = $("#" + id); if (e) e.remove(); });
+    ["sessClockWrap", "stripClockWrap", "sessCard", "sessFinish"].forEach((id) => { const e = $("#" + id); if (e) e.remove(); });
     const content = $("#dayContent");
     const meta = $(".day-meta", content);
     if (!meta) return;
@@ -1090,6 +1127,7 @@
       chip.innerHTML = `${icon("clock")}<span id="sessClock"></span>`;
       $("#sessClock", chip).dataset.start = String(s.start);
       meta.appendChild(chip);
+      $("#dayStrip").insertAdjacentHTML("beforeend", `<span class="pill clock" id="stripClockWrap">${icon("clock")}<span class="strip-clock"></span></span>`);
       const btn = document.createElement("button");
       btn.className = "btn";
       btn.id = "sessFinish";
@@ -1105,22 +1143,38 @@
     }
     updateSessClock();
     renderTimers();
+    updateDayStrip(); // годинник у смужці міг змінити її висоту — перевірити поріг
   }
 
   function updateSessClock() {
     const el = $("#sessClock");
     if (!el) return;
-    el.textContent = Z.fmtClock((Date.now() - Number(el.dataset.start)) / 1000);
+    const t = Z.fmtClock((Date.now() - Number(el.dataset.start)) / 1000);
+    el.textContent = t;
+    $all(".strip-clock").forEach((c) => { c.textContent = t; });
+  }
+
+  // Екран «Поверни телефон вертикально» (спека v9 §4.4). Кут і висоту читаємо тут, у момент перевірки, і не зберігаємо:
+  // на телефоні viewport і інсети змінюються після load. Висота — innerHeight (висота кореневого елемента на iOS 26 бреше).
+  // Таймери, сесія і вікна не чіпаються; поле у фокусі втрачає фокус, вписана вага зберігається чернеткою.
+  function checkRotate() {
+    const cover = $("#rotateCover");
+    if (!cover) return; // showFatal замінив вміст #app
+    const angle = screen.orientation && typeof screen.orientation.angle === "number" ? screen.orientation.angle : window.orientation;
+    const show = Z.rotateNeeded(angle, window.innerHeight);
+    if (show && cover.classList.contains("hidden")) blurInside(document.body);
+    cover.classList.toggle("hidden", !show);
   }
 
   // Повернулись у застосунок: оновити таймер, а якщо настав новий день — перемалювати.
   function onResume() {
     if (document.hidden) return;
+    checkRotate(); // телефон могли повернути, поки застосунок був у фоні
     if (timerBusy()) tickTimers();
     if (P && profile && P[profile] && renderedDate && renderedDate !== todayISO()) {
       resetTimers();
       if (currentTab === "today") showMain();
-      else { renderedDate = todayISO(); showTab(currentTab); }
+      else { renderedDate = todayISO(); todayTop = 0; todayTopDay = null; showTab(currentTab); }
     }
     if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) {
       navigator.serviceWorker.getRegistration().then((r) => r && r.update()).catch(() => {});
@@ -1656,6 +1710,20 @@
     $("#workStop").onclick = stopWork;
     $("#restPlus").onclick = () => adjustRest(15);
     $("#restMinus").onclick = () => adjustRest(-15);
+    // «Сьогодні»: позиція прокрутки й тонка смужка; схований екран читає scrollTop як 0 — його не записуємо
+    const sc = $("#todayScroll");
+    sc.addEventListener("scroll", () => {
+      // схований екран читає scrollTop як 0; під екраном повороту список перекладено в ландшафт — обидва не запам'ятовуємо
+      if ($("#main").classList.contains("hidden") || !$("#rotateCover").classList.contains("hidden")) return;
+      todayTop = sc.scrollTop;
+      todayTopDay = selectedDay;
+      updateDayStrip();
+    }, { passive: true });
+    window.addEventListener("resize", updateDayStrip);
+    window.addEventListener("orientationchange", checkRotate);
+    window.addEventListener("resize", checkRotate);
+    if (screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener("change", checkRotate);
+    $("#dayStrip").onclick = () => sc.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   }
 
   init();

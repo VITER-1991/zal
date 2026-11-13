@@ -188,6 +188,15 @@
     return e == null ? null : e - s.start;
   }
 
+  // Екран «Поверни телефон вертикально» (спека v9 §4.4): телефон лежить боком (кут 90 або 270; window.orientation дає -90)
+  // і viewport не вищий за 500 px. iPad у ландшафті й вікно на комп'ютері вищі — екран не потрібен; портрет із клавіатурою має кут 0.
+  function rotateNeeded(angle, viewportH) {
+    var a = Number(angle);
+    if (!isFinite(a) || !isNum(viewportH)) return false;
+    a = ((a % 360) + 360) % 360;
+    return (a === 90 || a === 270) && viewportH <= 500;
+  }
+
   root.ZalCore = {
     migrateLogV2: migrateLogV2,
     cleanLogV3: cleanLogV3,
@@ -204,6 +213,7 @@
     applyPlan: applyPlan,
     setsLabel: setsLabel,
     fmtClock: fmtClock,
-    sessionMs: sessionMs
+    sessionMs: sessionMs,
+    rotateNeeded: rotateNeeded
   };
 })(globalThis);

@@ -1,4 +1,4 @@
-const CACHE = "zal-v8";
+const CACHE = "zal-v9";
 const CORE_ASSETS = [
   "./",
   "index.html",
