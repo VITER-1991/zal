@@ -11,6 +11,33 @@
 <meta name="apple-mobile-web-app-title" content="Тест екрана">
 <meta name="robots" content="noindex">
 <link rel="manifest" href="diag.webmanifest">
+<script>
+/* Runs before first paint: picks the fix variant from ?fix=N (0..3, default 1),
+   marks <html data-fix data-bar>, and for fix 3 sets html.style.minHeight from
+   the screen size (never from innerHeight: that would oscillate). */
+(function () {
+  "use strict";
+  var fix = "1";
+  try {
+    var q = new URLSearchParams(location.search).get("fix");
+    if (q === "0" || q === "1" || q === "2" || q === "3") fix = q;
+  } catch (e) {}
+  document.documentElement.setAttribute("data-fix", fix);
+  document.documentElement.setAttribute("data-bar", "1");
+
+  function applyFix3() {
+    if (fix !== "3" || navigator.standalone !== true) return;
+    var portrait = true;
+    try { portrait = window.matchMedia ? window.matchMedia("(orientation: portrait)").matches : true; } catch (e) {}
+    var S = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+    document.documentElement.style.minHeight = S + "px";
+  }
+
+  window.__diagFix = fix;
+  window.__diagApplyFix3 = applyFix3;
+  applyFix3();
+})();
+</script>
 <style>
 /* ============ Base (mirrors the app) ============ */
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
@@ -26,20 +53,38 @@ body{
 button{font:inherit; color:inherit; touch-action:manipulation;}
 input{-webkit-user-select:text; user-select:text;}
 
-/* Root: fixed, column; the bottom 90 px hold nothing but the strips */
+/* ============ Fix variants (standalone only; fix 0 has no rule) ============ */
+@media (display-mode: standalone) { html[data-fix="1"] { min-height: min(100lvh, calc(100% + env(safe-area-inset-top))); } }
+@media (display-mode: standalone) { html[data-fix="2"] { min-height: 100lvh; } }
+
+/* Root: fixed, column; the bottom padding always clears the largest tab bar variant */
 #root{
   position:fixed; inset:0; display:flex; flex-direction:column;
-  padding-top:env(safe-area-inset-top); padding-bottom:90px;
+  padding-top:env(safe-area-inset-top);
+  padding-bottom:calc(56px + env(safe-area-inset-bottom) + 12px);
   overflow:hidden;
 }
 
-/* ============ Hint, table, controls, log ============ */
+/* ============ Fix links, bar control, hint, table, controls, log ============ */
+.row{display:flex; gap:4px; padding:4px 6px; align-items:center;}
+.row .lbl{color:#8ab; padding:0 2px; white-space:nowrap;}
+.pill{
+  display:inline-flex; align-items:center; justify-content:center;
+  min-height:44px; height:44px; padding:0 8px; min-width:0;
+  font:bold 13px/1 system-ui, -apple-system, sans-serif;
+  background:#1F1F23; color:#ddd; border:0; border-radius:6px; text-decoration:none;
+  touch-action:manipulation; white-space:nowrap;
+}
+.pill.active{background:#B14BFF; color:#16002B;}
+.pill.go{background:#2a6ad0; color:#fff;}
+#fixRow a{flex:1 1 0;}
+#fixRow button{flex:0 0 auto;}
+#barRow .pill{flex:0 0 auto; min-width:44px;}
 .hint{padding:4px 6px; color:#9bd; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 table{border-collapse:collapse; width:100%; table-layout:fixed;}
 td{padding:1px 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.3;}
 td.k{width:52px; color:#8ab;}
-/* The strips row holds eight numbers and the lock row a full error message:
-   let these two wrap at 320 px instead of hiding the tail */
+/* The html row may hold a long computed min-height: let it wrap at 320 px instead of hiding the tail */
 tr.wrap td{white-space:normal; overflow-wrap:anywhere;}
 .ctl{display:flex; gap:4px; padding:4px 6px; align-items:center;}
 .ctl input{
@@ -69,35 +114,38 @@ tr.wrap td{white-space:normal; overflow-wrap:anywhere;}
   padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
-/* ============ Bottom strips A..H (the core of the test) ============ */
-.strip{
-  width:12.5%; height:56px; margin:0; padding:0;
-  border:0; border-bottom:4px solid #fff; border-radius:0;
-  -webkit-appearance:none; appearance:none;
-  font:bold 14px/1 system-ui, -apple-system, sans-serif; color:#000;
-  z-index:1000; touch-action:manipulation;
-  white-space:nowrap; overflow:hidden;
-}
-/* A: how ZAL's tab bar is pinned today */
-#sA{left:0;     background:#ff4a3d; position:fixed; bottom:0;}
-/* B: classic vh */
-#sB{left:12.5%; background:#ff9f0a; position:fixed; top:calc(100vh - 56px);}
-/* C, D, E: top:-200px first, so a browser without the unit leaves the strip off-screen */
-#sC{left:25%;   background:#ffe14d; position:fixed; top:-200px; top:calc(100dvh - 56px);}
-#sD{left:37.5%; background:#4cd964; position:fixed; top:-200px; top:calc(100lvh - 56px);}
-#sE{left:50%;   background:#1fd1e8; position:fixed; top:-200px; top:calc(100svh - 56px);}
-/* F: top is set from JS (screen size minus 56 px); -200px only until the script runs */
-#sF{left:62.5%; background:#5e8dff; position:fixed; top:-200px;}
-/* G: bottom shifted down by the top inset */
-#sG{left:75%;   background:#bf5af2; position:fixed; bottom:calc(0px - env(safe-area-inset-top));}
-/* H: absolute inside a fixed wrapper sized with -webkit-fill-available */
-#hWrap{position:fixed; top:0; left:0; width:100%; height:-webkit-fill-available; pointer-events:none; z-index:1000;}
-#sH{left:87.5%; background:#ff8ac8; position:absolute; bottom:0; pointer-events:auto;}
+/* ============ Marker: 3 px line on the physical bottom edge, above the tab bar ============ */
+#marker{position: fixed; left: 0; right: 0; bottom: 0; height: 3px; background: #B14BFF; z-index: 40; pointer-events: none;}
+
+/* ============ Tab bar mock (copied from style.css with tokens resolved) ============ */
+.tabbar{position:fixed; left:0; right:0; bottom:0; z-index:30; display:flex; background:#000000; border-top:1px solid #2A2A2F;}
+.tab-btn{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; min-height:44px; padding:0; border:0; background:none; color:#8E8E93; font:600 12px/1.3 -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif; touch-action:manipulation;}
+.tab-btn.active{color:#D29BFF;}
+.tab-btn.active .ic{color:#B14BFF;}
+.ic{width:20px; height:20px; flex-shrink:0; fill:none; stroke:currentColor; display:inline-block; vertical-align:middle;}
+.ic.lg{width:24px; height:24px;}
+/* Height and bottom padding per variant */
+html[data-bar="1"] .tabbar{height:calc(56px + env(safe-area-inset-bottom)); padding:0 0 env(safe-area-inset-bottom);}
+html[data-bar="2"] .tabbar{height:calc(52px + max(env(safe-area-inset-bottom) - 8px, 6px)); padding:0 0 max(env(safe-area-inset-bottom) - 8px, 6px);}
+html[data-bar="3"] .tabbar{height:calc(48px + max(env(safe-area-inset-bottom) - 14px, 6px)); padding:0 0 max(env(safe-area-inset-bottom) - 14px, 6px);}
 </style>
 </head>
 <body>
 <div id="root">
-  <div class="hint">Скрін 1 → кроки з чату → скрін 2</div>
+  <div class="row" id="fixRow">
+    <a class="pill" href="diag.html?fix=0" data-fix="0">fix 0</a>
+    <a class="pill" href="diag.html?fix=1" data-fix="1">fix 1</a>
+    <a class="pill" href="diag.html?fix=2" data-fix="2">fix 2</a>
+    <a class="pill" href="diag.html?fix=3" data-fix="3">fix 3</a>
+    <button class="pill go" id="btnReload" type="button">Оновити</button>
+  </div>
+  <div class="row" id="barRow">
+    <span class="lbl">Панель</span>
+    <button class="pill active" type="button" data-bar="1">1</button>
+    <button class="pill" type="button" data-bar="2">2</button>
+    <button class="pill" type="button" data-bar="3">3</button>
+  </div>
+  <div class="hint">diag-2: скрін → кроки з чату → Копіювати</div>
   <table>
     <tr><td class="k">build</td><td id="v-build"></td></tr>
     <tr><td class="k">mode</td><td id="v-mode"></td></tr>
@@ -112,12 +160,14 @@ tr.wrap td{white-space:normal; overflow-wrap:anywhere;}
     <tr><td class="k">units</td><td id="v-units"></td></tr>
     <tr><td class="k">env</td><td id="v-env"></td></tr>
     <tr><td class="k">orient</td><td id="v-orient"></td></tr>
-    <tr class="wrap"><td class="k">strips</td><td id="v-strips"></td></tr>
-    <tr class="wrap"><td class="k">lock</td><td id="v-lock">—</td></tr>
+    <tr><td class="k">fix</td><td id="v-fix"></td></tr>
+    <tr class="wrap"><td class="k">html</td><td id="v-html"></td></tr>
+    <tr><td class="k">scroll</td><td id="v-scroll"></td></tr>
+    <tr><td class="k">marker</td><td id="v-marker"></td></tr>
+    <tr><td class="k">bar</td><td id="v-bar"></td></tr>
   </table>
   <div class="ctl">
     <input id="inp" type="text" inputmode="decimal" placeholder="1" aria-label="Поле вводу">
-    <button id="btnLock" type="button">Замок повороту</button>
     <button id="btnCopy" type="button">Копіювати</button>
     <span id="copyMsg"></span>
   </div>
@@ -132,28 +182,28 @@ tr.wrap td{white-space:normal; overflow-wrap:anywhere;}
 <div id="p-fixed"></div>
 <div id="p-env"></div>
 
-<!-- Strips A..H -->
-<button class="strip" id="sA" type="button" data-k="A">A</button>
-<button class="strip" id="sB" type="button" data-k="B">B</button>
-<button class="strip" id="sC" type="button" data-k="C">C</button>
-<button class="strip" id="sD" type="button" data-k="D">D</button>
-<button class="strip" id="sE" type="button" data-k="E">E</button>
-<button class="strip" id="sF" type="button" data-k="F">F</button>
-<button class="strip" id="sG" type="button" data-k="G">G</button>
-<div id="hWrap"><button class="strip" id="sH" type="button" data-k="H">H</button></div>
+<!-- Marker on the physical bottom edge -->
+<div id="marker"></div>
+
+<!-- Tab bar mock: icons inlined from the sprite in index.html -->
+<nav class="tabbar" id="tabbar">
+  <button class="tab-btn active" type="button" data-tab="1"><svg class="ic lg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 12c2 -2.96 0 -7 -1 -8c0 3.038 -1.773 4.741 -3 6c-1.226 1.26 -2 3.24 -2 5a6 6 0 1 0 12 0c0 -1.532 -1.056 -3.94 -2 -5c-1.786 3 -2.791 3 -4 2z"/></svg><span>Сьогодні</span></button>
+  <button class="tab-btn" type="button" data-tab="2"><svg class="ic lg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19l16 0"/><path d="M4 15l4 -6l4 2l4 -5l4 4"/></svg><span>Прогрес</span></button>
+  <button class="tab-btn" type="button" data-tab="3"><svg class="ic lg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19.875 12c.621 0 1.125 .512 1.125 1.143v5.714c0 .631 -.504 1.143 -1.125 1.143h-15.875a1 1 0 0 1 -1 -1v-5.857c0 -.631 .504 -1.143 1.125 -1.143h15.75z"/><path d="M9 12v2"/><path d="M6 12v3"/><path d="M12 12v3"/><path d="M18 12v3"/><path d="M15 12v2"/><path d="M3 3v4"/><path d="M3 5h18"/><path d="M21 3v4"/></svg><span>Тіло</span></button>
+  <button class="tab-btn" type="button" data-tab="4"><svg class="ic lg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 19a9 9 0 0 1 9 0a9 9 0 0 1 9 0"/><path d="M3 6a9 9 0 0 1 9 0a9 9 0 0 1 9 0"/><path d="M3 6l0 13"/><path d="M12 6l0 13"/><path d="M21 6l0 13"/></svg><span>Довідка</span></button>
+</nav>
 
 <script>
 (function () {
   "use strict";
 
-  var BUILD = "diag-1";
-  var LOG_MAX = 8;
-  var LETTERS = ["A", "B", "C", "D", "E", "F", "G", "H"];
+  var BUILD = "diag-2";
+  var LOG_MAX = 40;
+  var FIX = String(window.__diagFix || "1");
+  var BAR = "1";
 
   var $ = function (id) { return document.getElementById(id); };
-  var counts = {};
   var logLines = [];
-  var lockResult = "—"; // "—" until the lock button is pressed
   var loadTime = "";
 
   /* ---------- helpers ---------- */
@@ -231,20 +281,39 @@ tr.wrap td{white-space:normal; overflow-wrap:anywhere;}
     };
   }
 
-  // F: top = S - 56, S = larger screen side in portrait, smaller one in landscape
-  function placeF() {
-    var portrait = window.matchMedia ? window.matchMedia("(orientation: portrait)").matches : true;
-    var S = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
-    $("sF").style.top = (S - 56) + "px";
+  // fix row: the variant, plus "off: not standalone" when it cannot apply
+  function fixRow() {
+    if (FIX === "0") return "0";
+    var on = (FIX === "3")
+      ? (navigator.standalone === true)
+      : (mm("(display-mode: standalone)") === "true");
+    return FIX + (on ? "" : " off: not standalone");
   }
 
-  function stripsRow() {
-    var parts = [];
-    for (var i = 0; i < LETTERS.length; i++) {
-      var el = $("s" + LETTERS[i]);
-      parts.push(LETTERS[i] + " " + r1(el.getBoundingClientRect().bottom));
-    }
-    return parts.join(" ");
+  // html row: offsetHeight and the computed min-height string as is
+  function htmlRow() {
+    var de = document.documentElement;
+    var mh = "";
+    try { mh = getComputedStyle(de).minHeight; } catch (e) { mh = ""; }
+    return "offsetH " + r1(de.offsetHeight) + " min-height " + (mh === "" || mh === undefined || mh === null ? "n/a" : mh);
+  }
+
+  function scrollRow() {
+    var de = document.documentElement;
+    return "y " + r1(window.scrollY) + " extra " + r1(de.scrollHeight - window.innerHeight);
+  }
+
+  function markerRow() {
+    return "bottom " + r1($("marker").getBoundingClientRect().bottom);
+  }
+
+  // bar row: variant, total height, row height (total minus bottom padding), top edge
+  function barRow() {
+    var el = $("tabbar");
+    var rc = el.getBoundingClientRect();
+    var pb = parseFloat(getComputedStyle(el).paddingBottom);
+    if (isNaN(pb)) pb = 0;
+    return "v" + BAR + " total " + r1(rc.height) + " row " + r1(rc.height - pb) + " top " + r1(rc.top);
   }
 
   /* ---------- table ---------- */
@@ -272,11 +341,14 @@ tr.wrap td{white-space:normal; overflow-wrap:anywhere;}
     setText("v-units", "vh " + probeH("p-vh", "vh") + " dvh " + probeH("p-dvh", "dvh") + " svh " + probeH("p-svh", "svh") + " lvh " + probeH("p-lvh", "lvh"));
     setText("v-env", "t " + env.t + " r " + env.r + " b " + env.b + " l " + env.l);
     setText("v-orient", o.type + " " + o.angle + " portrait=" + o.portrait);
-    setText("v-strips", stripsRow());
-    setText("v-lock", lockResult);
+    setText("v-fix", fixRow());
+    setText("v-html", htmlRow());
+    setText("v-scroll", scrollRow());
+    setText("v-marker", markerRow());
+    setText("v-bar", barRow());
   }
 
-  /* ---------- log (last 8 events, newest first) ---------- */
+  /* ---------- log (last 40 events, newest first) ---------- */
 
   function addLog(name) {
     var vv = vvInfo();
@@ -287,6 +359,8 @@ tr.wrap td{white-space:normal; overflow-wrap:anywhere;}
       " vvH=" + (vv ? r1(vv.h) : "n/a") +
       " vvTop=" + (vv ? r1(vv.top) : "n/a") +
       " fixedH=" + r1(fr.height) +
+      " htmlH=" + r1(document.documentElement.offsetHeight) +
+      " scrollY=" + r1(window.scrollY) +
       " angle=" + o.angle;
     logLines.unshift(line);
     if (logLines.length > LOG_MAX) logLines.length = LOG_MAX;
@@ -299,38 +373,19 @@ tr.wrap td{white-space:normal; overflow-wrap:anywhere;}
     }
   }
 
-  // One refresh = place F, fill the table, append to the log
+  // One refresh = fill the table, append to the log
   function refresh(eventName) {
-    placeF();
     fillTable();
     addLog(eventName);
   }
 
-  /* ---------- controls ---------- */
-
-  function doLock() {
-    var so = screen.orientation;
-    if (!so || typeof so.lock !== "function") {
-      lockResult = "no lock()";
-      refresh("lock");
-      return;
-    }
-    var p;
-    try {
-      p = so.lock("portrait");
-    } catch (err) {
-      lockResult = (err && err.name ? err.name : "Error") + ": " + (err && err.message ? err.message : String(err));
-      refresh("lock");
-      return;
-    }
-    Promise.resolve(p).then(function () {
-      lockResult = "OK";
-      refresh("lock");
-    }, function (err) {
-      lockResult = (err && err.name ? err.name : "Error") + ": " + (err && err.message ? err.message : String(err));
-      refresh("lock");
-    });
+  // Re-apply fix 3 (no-op unless fix is 3 and standalone), then refresh
+  function reapplyAndRefresh(eventName) {
+    try { if (typeof window.__diagApplyFix3 === "function") window.__diagApplyFix3(); } catch (e) {}
+    refresh(eventName);
   }
+
+  /* ---------- controls ---------- */
 
   function tableAsText() {
     var rows = document.querySelectorAll("table tr");
@@ -363,27 +418,47 @@ tr.wrap td{white-space:normal; overflow-wrap:anywhere;}
     });
   }
 
-  /* ---------- wiring ---------- */
-
-  function onStripClick(ev) {
-    var k = ev.currentTarget.getAttribute("data-k");
-    counts[k] = (counts[k] || 0) + 1;
-    ev.currentTarget.textContent = k + counts[k];
-    refresh("tap " + k);
+  function setActive(list, attr, value) {
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].getAttribute(attr) === value) list[i].classList.add("active");
+      else list[i].classList.remove("active");
+    }
   }
+
+  function onTabClick(ev) {
+    var n = ev.currentTarget.getAttribute("data-tab");
+    setActive(document.querySelectorAll("#tabbar .tab-btn"), "data-tab", n);
+    refresh("tab " + n);
+  }
+
+  function onBarClick(ev) {
+    BAR = ev.currentTarget.getAttribute("data-bar");
+    document.documentElement.setAttribute("data-bar", BAR);
+    setActive(document.querySelectorAll("#barRow .pill"), "data-bar", BAR);
+    refresh("bar " + BAR);
+  }
+
+  /* ---------- wiring ---------- */
 
   function init() {
     loadTime = hms(new Date());
 
-    for (var i = 0; i < LETTERS.length; i++) {
-      counts[LETTERS[i]] = 0;
-      $("s" + LETTERS[i]).addEventListener("click", onStripClick);
-    }
-    $("btnLock").addEventListener("click", doLock);
+    setActive(document.querySelectorAll("#fixRow a"), "data-fix", FIX);
+    var attr = document.documentElement.getAttribute("data-bar");
+    if (attr === "1" || attr === "2" || attr === "3") BAR = attr;
+    setActive(document.querySelectorAll("#barRow .pill"), "data-bar", BAR);
+
+    var tabs = document.querySelectorAll("#tabbar .tab-btn");
+    for (var i = 0; i < tabs.length; i++) tabs[i].addEventListener("click", onTabClick);
+    var bars = document.querySelectorAll("#barRow .pill");
+    for (var j = 0; j < bars.length; j++) bars[j].addEventListener("click", onBarClick);
+
+    $("btnReload").addEventListener("click", function () { location.reload(); });
     $("btnCopy").addEventListener("click", doCopy);
 
-    window.addEventListener("resize", function () { refresh("resize"); });
-    window.addEventListener("orientationchange", function () { refresh("orientationchange"); });
+    window.addEventListener("resize", function () { reapplyAndRefresh("resize"); });
+    window.addEventListener("orientationchange", function () { reapplyAndRefresh("orientationchange"); });
+    window.addEventListener("scroll", function () { refresh("scroll"); });
     if (window.visualViewport) {
       window.visualViewport.addEventListener("resize", function () { refresh("vv-resize"); });
       window.visualViewport.addEventListener("scroll", function () { refresh("vv-scroll"); });
