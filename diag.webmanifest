@@ -1,0 +1,11 @@
+{
+  "name": "Тест екрана ZAL",
+  "short_name": "Тест екрана",
+  "id": "./diag.html",
+  "start_url": "./diag.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "lang": "uk"
+}

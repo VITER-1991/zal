@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Тест екрана ZAL</title>
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Тест екрана">
+<meta name="robots" content="noindex">
+<link rel="manifest" href="diag.webmanifest">
+<style>
+/* ============ Base (mirrors the app) ============ */
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+/* On purpose, unlike the app: keeps text size after a rotation */
+html{-webkit-text-size-adjust:100%; text-size-adjust:100%;}
+html,body{height:100%;}
+body{
+  margin:0; background:#000; color:#ddd;
+  font:11px/1.3 ui-monospace, Menlo, Monaco, monospace;
+  overscroll-behavior-y:none;
+  -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
+}
+button{font:inherit; color:inherit; touch-action:manipulation;}
+input{-webkit-user-select:text; user-select:text;}
+
+/* Root: fixed, column; the bottom 90 px hold nothing but the strips */
+#root{
+  position:fixed; inset:0; display:flex; flex-direction:column;
+  padding-top:env(safe-area-inset-top); padding-bottom:90px;
+  overflow:hidden;
+}
+
+/* ============ Hint, table, controls, log ============ */
+.hint{padding:4px 6px; color:#9bd; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+table{border-collapse:collapse; width:100%; table-layout:fixed;}
+td{padding:1px 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.3;}
+td.k{width:52px; color:#8ab;}
+/* The strips row holds eight numbers and the lock row a full error message:
+   let these two wrap at 320 px instead of hiding the tail */
+tr.wrap td{white-space:normal; overflow-wrap:anywhere;}
+.ctl{display:flex; gap:4px; padding:4px 6px; align-items:center;}
+.ctl input{
+  flex:1 1 56px; min-width:0; height:44px; font-size:17px; padding:0 8px;
+  background:#111; color:#eee; border:1px solid #444; border-radius:6px;
+}
+.ctl button{
+  flex:0 0 auto; height:44px; min-height:44px; padding:0 8px;
+  font:bold 13px/1 system-ui, -apple-system, sans-serif;
+  background:#2a6ad0; color:#fff; border:0; border-radius:6px;
+}
+#copyMsg{flex:0 1 auto; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#9bd;}
+#log{flex:1 1 auto; min-height:0; overflow-y:auto; padding:2px 6px; color:#aaa;}
+#log div{overflow-wrap:anywhere; padding:1px 0; border-top:1px solid #222;}
+#log div:first-child{border-top:0; color:#ddd;}
+
+/* ============ Hidden probes: never intercept taps, never scroll ============ */
+.probe{position:fixed; left:0; top:0; width:0; visibility:hidden; pointer-events:none;}
+#p-vh{height:100vh;}
+/* height: 0 first, so an unsupported unit reads 0 (a valid measurement) */
+#p-dvh{height:0; height:100dvh;}
+#p-svh{height:0; height:100svh;}
+#p-lvh{height:0; height:100lvh;}
+#p-fixed{position:fixed; inset:0; visibility:hidden; pointer-events:none;}
+#p-env{
+  position:fixed; left:0; top:0; width:0; height:0; visibility:hidden; pointer-events:none;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* ============ Bottom strips A..H (the core of the test) ============ */
+.strip{
+  width:12.5%; height:56px; margin:0; padding:0;
+  border:0; border-bottom:4px solid #fff; border-radius:0;
+  -webkit-appearance:none; appearance:none;
+  font:bold 14px/1 system-ui, -apple-system, sans-serif; color:#000;
+  z-index:1000; touch-action:manipulation;
+  white-space:nowrap; overflow:hidden;
+}
+/* A: how ZAL's tab bar is pinned today */
+#sA{left:0;     background:#ff4a3d; position:fixed; bottom:0;}
+/* B: classic vh */
+#sB{left:12.5%; background:#ff9f0a; position:fixed; top:calc(100vh - 56px);}
+/* C, D, E: top:-200px first, so a browser without the unit leaves the strip off-screen */
+#sC{left:25%;   background:#ffe14d; position:fixed; top:-200px; top:calc(100dvh - 56px);}
+#sD{left:37.5%; background:#4cd964; position:fixed; top:-200px; top:calc(100lvh - 56px);}
+#sE{left:50%;   background:#1fd1e8; position:fixed; top:-200px; top:calc(100svh - 56px);}
+/* F: top is set from JS (screen size minus 56 px); -200px only until the script runs */
+#sF{left:62.5%; background:#5e8dff; position:fixed; top:-200px;}
+/* G: bottom shifted down by the top inset */
+#sG{left:75%;   background:#bf5af2; position:fixed; bottom:calc(0px - env(safe-area-inset-top));}
+/* H: absolute inside a fixed wrapper sized with -webkit-fill-available */
+#hWrap{position:fixed; top:0; left:0; width:100%; height:-webkit-fill-available; pointer-events:none; z-index:1000;}
+#sH{left:87.5%; background:#ff8ac8; position:absolute; bottom:0; pointer-events:auto;}
+</style>
+</head>
+<body>
+<div id="root">
+  <div class="hint">Скрін 1 → кроки з чату → скрін 2</div>
+  <table>
+    <tr><td class="k">build</td><td id="v-build"></td></tr>
+    <tr><td class="k">mode</td><td id="v-mode"></td></tr>
+    <tr><td class="k">ua</td><td id="v-ua"></td></tr>
+    <tr><td class="k">dpr</td><td id="v-dpr"></td></tr>
+    <tr><td class="k">screen</td><td id="v-screen"></td></tr>
+    <tr><td class="k">inner</td><td id="v-inner"></td></tr>
+    <tr><td class="k">docEl</td><td id="v-docEl"></td></tr>
+    <tr><td class="k">body</td><td id="v-body"></td></tr>
+    <tr><td class="k">vv</td><td id="v-vv"></td></tr>
+    <tr><td class="k">fixed</td><td id="v-fixed"></td></tr>
+    <tr><td class="k">units</td><td id="v-units"></td></tr>
+    <tr><td class="k">env</td><td id="v-env"></td></tr>
+    <tr><td class="k">orient</td><td id="v-orient"></td></tr>
+    <tr class="wrap"><td class="k">strips</td><td id="v-strips"></td></tr>
+    <tr class="wrap"><td class="k">lock</td><td id="v-lock">—</td></tr>
+  </table>
+  <div class="ctl">
+    <input id="inp" type="text" inputmode="decimal" placeholder="1" aria-label="Поле вводу">
+    <button id="btnLock" type="button">Замок повороту</button>
+    <button id="btnCopy" type="button">Копіювати</button>
+    <span id="copyMsg"></span>
+  </div>
+  <div id="log"></div>
+</div>
+
+<!-- Hidden probes -->
+<div class="probe" id="p-vh"></div>
+<div class="probe" id="p-dvh"></div>
+<div class="probe" id="p-svh"></div>
+<div class="probe" id="p-lvh"></div>
+<div id="p-fixed"></div>
+<div id="p-env"></div>
+
+<!-- Strips A..H -->
+<button class="strip" id="sA" type="button" data-k="A">A</button>
+<button class="strip" id="sB" type="button" data-k="B">B</button>
+<button class="strip" id="sC" type="button" data-k="C">C</button>
+<button class="strip" id="sD" type="button" data-k="D">D</button>
+<button class="strip" id="sE" type="button" data-k="E">E</button>
+<button class="strip" id="sF" type="button" data-k="F">F</button>
+<button class="strip" id="sG" type="button" data-k="G">G</button>
+<div id="hWrap"><button class="strip" id="sH" type="button" data-k="H">H</button></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var BUILD = "diag-1";
+  var LOG_MAX = 8;
+  var LETTERS = ["A", "B", "C", "D", "E", "F", "G", "H"];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var counts = {};
+  var logLines = [];
+  var lockResult = "—"; // "—" until the lock button is pressed
+  var loadTime = "";
+
+  /* ---------- helpers ---------- */
+
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  function hms(d) { return pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds()); }
+
+  // undefined / null / NaN -> "n/a"; everything else as a string
+  function na(v) {
+    if (v === undefined || v === null) return "n/a";
+    if (typeof v === "number" && isNaN(v)) return "n/a";
+    return String(v);
+  }
+
+  // number rounded to one decimal, or "n/a"
+  function r1(v) {
+    if (typeof v === "string") v = parseFloat(v);
+    if (typeof v !== "number" || isNaN(v)) return "n/a";
+    return String(Math.round(v * 10) / 10);
+  }
+
+  function mm(q) {
+    try { return window.matchMedia ? String(window.matchMedia(q).matches) : "n/a"; }
+    catch (e) { return "n/a"; }
+  }
+
+  function setText(id, text) { $(id).textContent = text; }
+
+  /* ---------- individual measurements ---------- */
+
+  function uaShort() {
+    var ua = (navigator.userAgent || "");
+    var os = /OS (\d+)[_.](\d+)/.exec(ua);
+    var saf = /Version\/(\d+(\.\d+)?)/.exec(ua);
+    var osStr = os ? "iOS " + os[1] + "." + os[2] : "iOS n/a";
+    var safStr = saf ? "Safari " + saf[1] : "Safari n/a";
+    return osStr + " / " + safStr;
+  }
+
+  // true when the browser supports the given CSS value (unknown -> assume yes)
+  function supports(prop, value) {
+    try { return (window.CSS && CSS.supports) ? CSS.supports(prop, value) : true; }
+    catch (e) { return true; }
+  }
+
+  function envInsets() {
+    if (!supports("padding-top", "env(safe-area-inset-top)")) return { t: "n/a", r: "n/a", b: "n/a", l: "n/a" };
+    var cs = getComputedStyle($("p-env"));
+    return {
+      t: r1(cs.paddingTop), r: r1(cs.paddingRight),
+      b: r1(cs.paddingBottom), l: r1(cs.paddingLeft)
+    };
+  }
+
+  function fixedRect() { return $("p-fixed").getBoundingClientRect(); }
+
+  // height of a unit probe, or "n/a" when the unit is unsupported
+  function probeH(id, unit) {
+    if (unit && !supports("height", "100" + unit)) return "n/a";
+    return r1($(id).getBoundingClientRect().height);
+  }
+
+  function vvInfo() {
+    var vv = window.visualViewport;
+    if (!vv) return null;
+    return { w: vv.width, h: vv.height, top: vv.offsetTop, pageTop: vv.pageTop, scale: vv.scale };
+  }
+
+  function orientInfo() {
+    var so = screen.orientation;
+    return {
+      type: so ? na(so.type) : "n/a",
+      angle: so ? r1(so.angle) : (typeof window.orientation === "number" ? r1(window.orientation) : "n/a"),
+      portrait: mm("(orientation: portrait)")
+    };
+  }
+
+  // F: top = S - 56, S = larger screen side in portrait, smaller one in landscape
+  function placeF() {
+    var portrait = window.matchMedia ? window.matchMedia("(orientation: portrait)").matches : true;
+    var S = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+    $("sF").style.top = (S - 56) + "px";
+  }
+
+  function stripsRow() {
+    var parts = [];
+    for (var i = 0; i < LETTERS.length; i++) {
+      var el = $("s" + LETTERS[i]);
+      parts.push(LETTERS[i] + " " + r1(el.getBoundingClientRect().bottom));
+    }
+    return parts.join(" ");
+  }
+
+  /* ---------- table ---------- */
+
+  function fillTable() {
+    var de = document.documentElement;
+    var b = document.body;
+    var vv = vvInfo();
+    var fr = fixedRect();
+    var env = envInsets();
+    var o = orientInfo();
+
+    setText("v-build", BUILD + " " + loadTime);
+    setText("v-mode", "standalone=" + na(navigator.standalone) + " display-mode=" + mm("(display-mode: standalone)"));
+    setText("v-ua", uaShort());
+    setText("v-dpr", r1(window.devicePixelRatio));
+    setText("v-screen", r1(screen.width) + "×" + r1(screen.height) + " avail " + r1(screen.availWidth) + "×" + r1(screen.availHeight));
+    setText("v-inner", r1(window.innerWidth) + "×" + r1(window.innerHeight) + " outer " + r1(window.outerWidth) + "×" + r1(window.outerHeight));
+    setText("v-docEl", r1(de.clientWidth) + "×" + r1(de.clientHeight) + " scroll " + r1(de.scrollHeight));
+    setText("v-body", b ? r1(b.clientWidth) + "×" + r1(b.clientHeight) : "n/a");
+    setText("v-vv", vv
+      ? r1(vv.w) + "×" + r1(vv.h) + " top " + r1(vv.top) + " pageTop " + r1(vv.pageTop) + " scale " + r1(vv.scale)
+      : "n/a");
+    setText("v-fixed", "top " + r1(fr.top) + " bottom " + r1(fr.bottom) + " h " + r1(fr.height));
+    setText("v-units", "vh " + probeH("p-vh", "vh") + " dvh " + probeH("p-dvh", "dvh") + " svh " + probeH("p-svh", "svh") + " lvh " + probeH("p-lvh", "lvh"));
+    setText("v-env", "t " + env.t + " r " + env.r + " b " + env.b + " l " + env.l);
+    setText("v-orient", o.type + " " + o.angle + " portrait=" + o.portrait);
+    setText("v-strips", stripsRow());
+    setText("v-lock", lockResult);
+  }
+
+  /* ---------- log (last 8 events, newest first) ---------- */
+
+  function addLog(name) {
+    var vv = vvInfo();
+    var fr = fixedRect();
+    var o = orientInfo();
+    var line = hms(new Date()) + " " + name +
+      " innerH=" + r1(window.innerHeight) +
+      " vvH=" + (vv ? r1(vv.h) : "n/a") +
+      " vvTop=" + (vv ? r1(vv.top) : "n/a") +
+      " fixedH=" + r1(fr.height) +
+      " angle=" + o.angle;
+    logLines.unshift(line);
+    if (logLines.length > LOG_MAX) logLines.length = LOG_MAX;
+    var box = $("log");
+    box.textContent = "";
+    for (var i = 0; i < logLines.length; i++) {
+      var d = document.createElement("div");
+      d.textContent = logLines[i];
+      box.appendChild(d);
+    }
+  }
+
+  // One refresh = place F, fill the table, append to the log
+  function refresh(eventName) {
+    placeF();
+    fillTable();
+    addLog(eventName);
+  }
+
+  /* ---------- controls ---------- */
+
+  function doLock() {
+    var so = screen.orientation;
+    if (!so || typeof so.lock !== "function") {
+      lockResult = "no lock()";
+      refresh("lock");
+      return;
+    }
+    var p;
+    try {
+      p = so.lock("portrait");
+    } catch (err) {
+      lockResult = (err && err.name ? err.name : "Error") + ": " + (err && err.message ? err.message : String(err));
+      refresh("lock");
+      return;
+    }
+    Promise.resolve(p).then(function () {
+      lockResult = "OK";
+      refresh("lock");
+    }, function (err) {
+      lockResult = (err && err.name ? err.name : "Error") + ": " + (err && err.message ? err.message : String(err));
+      refresh("lock");
+    });
+  }
+
+  function tableAsText() {
+    var rows = document.querySelectorAll("table tr");
+    var out = [];
+    for (var i = 0; i < rows.length; i++) {
+      var cells = rows[i].children;
+      out.push(cells[0].textContent + ": " + cells[1].textContent);
+    }
+    return out.join("\n");
+  }
+
+  function showCopyMsg(ok) {
+    setText("copyMsg", ok ? "скопійовано" : "не вдалось");
+  }
+
+  function doCopy() {
+    var text = tableAsText() + "\n\n" + logLines.join("\n");
+    var cb = navigator.clipboard;
+    if (!cb || typeof cb.writeText !== "function") {
+      showCopyMsg(false);
+      refresh("copy");
+      return;
+    }
+    cb.writeText(text).then(function () {
+      showCopyMsg(true);
+      refresh("copy");
+    }, function () {
+      showCopyMsg(false);
+      refresh("copy");
+    });
+  }
+
+  /* ---------- wiring ---------- */
+
+  function onStripClick(ev) {
+    var k = ev.currentTarget.getAttribute("data-k");
+    counts[k] = (counts[k] || 0) + 1;
+    ev.currentTarget.textContent = k + counts[k];
+    refresh("tap " + k);
+  }
+
+  function init() {
+    loadTime = hms(new Date());
+
+    for (var i = 0; i < LETTERS.length; i++) {
+      counts[LETTERS[i]] = 0;
+      $("s" + LETTERS[i]).addEventListener("click", onStripClick);
+    }
+    $("btnLock").addEventListener("click", doLock);
+    $("btnCopy").addEventListener("click", doCopy);
+
+    window.addEventListener("resize", function () { refresh("resize"); });
+    window.addEventListener("orientationchange", function () { refresh("orientationchange"); });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", function () { refresh("vv-resize"); });
+      window.visualViewport.addEventListener("scroll", function () { refresh("vv-scroll"); });
+    }
+    document.addEventListener("focusin", function () { refresh("focusin"); });
+    document.addEventListener("focusout", function () { refresh("focusout"); });
+
+    // First refresh on the real load event (or at once if it already fired)
+    if (document.readyState === "complete") {
+      refresh("load");
+    } else {
+      window.addEventListener("load", function () { refresh("load"); });
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>
